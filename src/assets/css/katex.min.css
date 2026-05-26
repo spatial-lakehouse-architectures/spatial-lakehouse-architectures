@@ -1,0 +1,4 @@
+/* KaTeX placeholder. Real KaTeX CSS lives in node_modules; build can swap. */
+.katex, .katex-display { font-family: "KaTeX_Main", "Times New Roman", serif; }
+.katex-display { display: block; text-align: center; }
+.katex { font-style: normal; }

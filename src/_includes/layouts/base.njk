@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {%- set headTitle = seoTitle or title -%}
+  <title>{% if headTitle and page.url != "/" %}{{ headTitle }} · {{ site.shortName }}{% else %}{{ site.name }} · Production patterns for Iceberg & Delta Lake{% endif %}</title>
+  <meta name="description" content="{{ description or site.description }}">
+  <meta name="theme-color" content="{{ site.themeColor }}">
+  <meta name="color-scheme" content="light">
+  {% if noindex %}<meta name="robots" content="noindex,nofollow">{% else %}<meta name="robots" content="index,follow">{% endif %}
+  <link rel="canonical" href="{{ page.url | absoluteUrl }}">
+
+  <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="{{ site.shortName }}">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <link rel="manifest" href="/manifest.webmanifest">
+
+  <meta property="og:type" content="{% if page.url == '/' %}website{% else %}article{% endif %}">
+  <meta property="og:site_name" content="{{ site.name }}">
+  <meta property="og:title" content="{% if headTitle and page.url != '/' %}{{ headTitle }}{% else %}{{ site.name }}{% endif %}">
+  <meta property="og:description" content="{{ description or site.description }}">
+  <meta property="og:url" content="{{ page.url | absoluteUrl }}">
+  <meta property="og:image" content="{{ '/assets/icons/og-image.svg' | absoluteUrl }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{% if headTitle and page.url != '/' %}{{ headTitle }}{% else %}{{ site.name }}{% endif %}">
+  <meta name="twitter:description" content="{{ description or site.description }}">
+
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <link rel="stylesheet" href="/assets/css/katex.min.css">
+
+  {% if page.url == "/" %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": {{ site.name | dump | safe }},
+    "alternateName": {{ site.shortName | dump | safe }},
+    "url": "{{ site.url }}",
+    "description": {{ site.description | dump | safe }},
+    "inLanguage": "en",
+    "publisher": {
+      "@type": "Organization",
+      "name": {{ site.name | dump | safe }},
+      "url": "{{ site.url }}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{{ '/assets/icons/icon-512.svg' | absoluteUrl }}"
+      }
+    }
+  }
+  </script>
+  {% elif not noindex %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": {{ title | dump | safe }},
+    "description": {{ (description or site.description) | dump | safe }},
+    "url": "{{ page.url | absoluteUrl }}",
+    "mainEntityOfPage": "{{ page.url | absoluteUrl }}",
+    "inLanguage": "en",
+    "isPartOf": {
+      "@type": "WebSite",
+      "name": {{ site.name | dump | safe }},
+      "url": "{{ site.url }}"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": {{ site.name | dump | safe }},
+      "url": "{{ site.url }}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{{ '/assets/icons/icon-512.svg' | absoluteUrl }}"
+      }
+    },
+    "image": "{{ '/assets/icons/og-image.svg' | absoluteUrl }}"
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": "{{ site.url }}/" }
+      {% set crumbs = page.url | breadcrumb %}
+      {% for c in crumbs %}
+        ,{ "@type": "ListItem", "position": {{ loop.index + 1 }}, "name": "{{ c.slug | titleFromSlug }}", "item": "{{ c.url | absoluteUrl }}" }
+      {% endfor %}
+    ]
+  }
+  </script>
+  {% endif %}
+</head>
+<body class="page {% block bodyClass %}{% endblock %}">
+  {% include "partials/header.njk" %}
+  <main id="main" class="site-main">
+    {% block content %}{{ content | safe }}{% endblock %}
+  </main>
+  {% include "partials/footer.njk" %}
+  <script src="/assets/js/site.js" defer></script>
+</body>
+</html>

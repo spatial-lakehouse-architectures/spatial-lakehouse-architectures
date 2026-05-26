@@ -1,0 +1,60 @@
+---
+layout: layouts/base.njk
+---
+{% from "partials/icons.njk" import icon %}
+<section class="hero">
+  <div class="container hero__inner">
+    <div class="hero__logo">
+      {% include "partials/logo.njk" %}
+    </div>
+    <h1 class="hero__title">
+      <span class="hero__title-line">Spatial Lakehouse</span>
+      <span class="hero__title-line hero__title-accent">Architectures</span>
+    </h1>
+    <p class="hero__tagline">{{ site.tagline }}</p>
+
+    <div class="hero__ctas">
+      {% for pillar in site.pillars %}
+        <a href="/{{ pillar.slug }}/" class="cta-button" style="--pillar-color: {{ pillar.color }}">
+          <span class="cta-button__icon">{{ icon(pillar.icon) }}</span>
+          <span class="cta-button__text">
+            <span class="cta-button__label">{{ pillar.title }}</span>
+            <span class="cta-button__hint">Jump to section {{ icon("arrow-right") }}</span>
+          </span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="intro container">
+  <div class="intro__copy">
+    <h2 class="section-title">A production reference, not a marketing site</h2>
+    <p>{{ site.description }} The transition from monolithic spatial databases to a spatial data lakehouse is not a storage migration — it is a fundamental re-architecture of how geospatial data is serialized, versioned, indexed, and queried at scale.</p>
+    <p>This site documents the engineering contracts required to make that architecture deliver: deterministic geometry serialization (WKB / GeoParquet), partition strategies that align with real query patterns, predicate pushdown that actually pushes down, and Python orchestration that respects snapshot isolation.</p>
+    <p>Every guide is written for {{ site.audience | lower }} who own the pipeline end-to-end — from S3 buckets and catalog manifests to PySpark configurations and CI/CD validation gates. No vendor pitches, no toy examples; just patterns and trade-offs that survive contact with petabyte-scale data.</p>
+    <p>Pick a pillar below to explore deeper topics, troubleshooting matrices, and ready-to-paste configurations.</p>
+  </div>
+</section>
+
+<section class="pillars container">
+  <h2 class="section-title">Explore the pillars</h2>
+  <div class="pillars__grid">
+    {% for pillar in site.pillars %}
+      {% set topics = collections.content | topicsOf(pillar.slug) %}
+      <article class="pillar-card" style="--pillar-color: {{ pillar.color }}">
+        <header class="pillar-card__header">
+          <span class="pillar-card__icon">{{ icon(pillar.icon) }}</span>
+          <h3 class="pillar-card__title"><a href="/{{ pillar.slug }}/">{{ pillar.title }}</a></h3>
+        </header>
+        <p class="pillar-card__summary">{{ pillar.summary }}</p>
+        <ul class="pillar-card__topics">
+          {% for topic in topics %}
+            <li><a href="{{ topic.url }}">{{ topic.data.title }}</a></li>
+          {% endfor %}
+        </ul>
+        <a class="pillar-card__cta" href="/{{ pillar.slug }}/">Open section {{ icon("arrow-right") }}</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>

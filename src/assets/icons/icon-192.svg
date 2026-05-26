@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fbf9f3"/>
+      <stop offset="100%" stop-color="#e7eef0"/>
+    </linearGradient>
+    <linearGradient id="w" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3fb8c4"/>
+      <stop offset="100%" stop-color="#0e6e7d"/>
+    </linearGradient>
+    <linearGradient id="l" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7ec48b"/>
+      <stop offset="100%" stop-color="#3f8c5e"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f1c560"/>
+      <stop offset="100%" stop-color="#c87a1f"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="40" fill="url(#bg)"/>
+  <g transform="translate(28 28) scale(2.125)">
+    <polygon points="32,54 12,44 12,28 32,38 52,28 52,44" fill="url(#w)"/>
+    <polygon points="32,40 14,30 14,18 32,28 50,18 50,30" fill="url(#l)"/>
+    <polygon points="32,26 18,18 18,10 32,18 46,10 46,18" fill="url(#s)"/>
+  </g>
+</svg>

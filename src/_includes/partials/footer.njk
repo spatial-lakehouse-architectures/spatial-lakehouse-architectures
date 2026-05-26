@@ -1,0 +1,28 @@
+{% from "partials/icons.njk" import icon %}
+<footer class="site-footer" role="contentinfo">
+  <div class="container site-footer__inner">
+    <div class="site-footer__brand">
+      {% include "partials/logo.njk" %}
+      <div>
+        <p class="site-footer__name">{{ site.name }}</p>
+        <p class="site-footer__desc">{{ site.description }}</p>
+      </div>
+    </div>
+    <nav class="site-footer__nav" aria-label="Footer">
+      {% for pillar in site.pillars %}
+        {% set topics = collections.content | topicsOf(pillar.slug) %}
+        <section class="site-footer__col">
+          <h2 class="site-footer__heading" style="--pillar-color: {{ pillar.color }}">
+            <a href="/{{ pillar.slug }}/">{{ icon(pillar.icon) }} {{ pillar.title }}</a>
+          </h2>
+          <ul>
+            {% for item in topics %}
+              <li><a href="{{ item.url }}">{{ item.data.title }}</a></li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endfor %}
+    </nav>
+    <p class="site-footer__legal">© {{ site.name }}. Built for {{ site.audience | lower }}</p>
+  </div>
+</footer>

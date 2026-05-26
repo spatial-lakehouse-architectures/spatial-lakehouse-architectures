@@ -1,0 +1,24 @@
+{
+  "name": "spatial-lakehouse-architectures",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-focused resource for spatial data in open table formats (Iceberg, Delta Lake).",
+  "scripts": {
+    "clean": "rimraf _site",
+    "build": "eleventy",
+    "serve": "eleventy --serve --quiet",
+    "debug": "DEBUG=Eleventy* eleventy",
+    "deploy": "npm run build && wrangler pages deploy _site --project-name=spatial-lakehouse-architectures --commit-dirty=true",
+    "deploy:create": "wrangler pages project create spatial-lakehouse-architectures --production-branch=main"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^3.0.0",
+    "@11ty/eleventy-navigation": "^0.3.5",
+    "highlight.js": "^11.10.0",
+    "markdown-it": "^14.1.0",
+    "markdown-it-anchor": "^9.2.0",
+    "markdown-it-attrs": "^4.3.1",
+    "markdown-it-katex": "^2.0.3",
+    "rimraf": "^5.0.10"
+  }
+}

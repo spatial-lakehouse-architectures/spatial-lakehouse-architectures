@@ -1,0 +1,20 @@
+---
+layout: layouts/base.njk
+title: Offline
+description: This page is unavailable while you are offline. Reconnect to continue.
+permalink: /offline/index.html
+eleventyExcludeFromCollections: true
+noindex: true
+---
+{% from "partials/icons.njk" import icon %}
+<section class="container" style="padding-block: var(--sp-7); text-align: center;">
+  <div style="max-width: 60ch; margin: 0 auto;">
+    <div style="width: 120px; margin: 0 auto var(--sp-5);">{% include "partials/logo.njk" %}</div>
+    <h1 style="font-size: var(--fs-h1); margin: 0 0 var(--sp-4); background: linear-gradient(90deg, var(--c-primary), var(--c-accent)); -webkit-background-clip: text; background-clip: text; color: transparent;">You're offline</h1>
+    <p style="color: var(--c-ink-soft);">This page hasn't been cached yet. Reconnect, then try again — previously visited pages remain available offline.</p>
+    <p><a class="cta-button" href="/" style="--pillar-color: var(--c-primary);">
+      <span class="cta-button__icon">{{ icon("home") }}</span>
+      <span class="cta-button__text"><span class="cta-button__label">Return to home</span></span>
+    </a></p>
+  </div>
+</section>

@@ -1,0 +1,35 @@
+{% from "partials/icons.njk" import icon %}
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="site-header" role="banner">
+  <div class="container site-header__inner">
+    <a href="/" class="site-header__brand" aria-label="{{ site.name }} home">
+      {% include "partials/logo.njk" %}
+      <span class="site-header__title">
+        <span class="site-header__title-main">Spatial Lakehouse</span>
+        <span class="site-header__title-sub">Architectures</span>
+      </span>
+    </a>
+
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="primary-nav" aria-label="Toggle navigation">
+      {{ icon("menu") }}
+      {{ icon("close") }}
+    </button>
+
+    <nav id="primary-nav" class="site-nav" aria-label="Primary">
+      <ul class="site-nav__list">
+        <li>
+          <a class="site-nav__link {% if page.url == '/' %}is-active{% endif %}" href="/">
+            {{ icon("home") }}<span>Home</span>
+          </a>
+        </li>
+        {% for pillar in site.pillars %}
+          <li>
+            <a class="site-nav__link {% if pillarSlug == pillar.slug %}is-active{% endif %}" href="/{{ pillar.slug }}/" style="--pillar-color: {{ pillar.color }}">
+              {{ icon(pillar.icon) }}<span>{{ pillar.title | replace(' & ', ' & ') }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </div>
+</header>

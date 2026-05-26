@@ -1,0 +1,72 @@
+---
+layout: layouts/base.njk
+---
+{% from "partials/icons.njk" import icon %}
+{%- set crumbs = page.url | breadcrumb -%}
+{%- set pillarObj = null -%}
+{%- for p in site.pillars -%}
+  {%- if p.slug == pillarSlug -%}{%- set pillarObj = p -%}{%- endif -%}
+{%- endfor -%}
+{%- set children = collections.content | childrenOf(page.url) -%}
+{%- set siblings = collections.content | siblingsOf(page.url) -%}
+
+<article class="article {% if isPillarHub %}article--pillar{% endif %}" {% if pillarObj %}style="--pillar-color: {{ pillarObj.color }}"{% endif %}>
+  <div class="container article__container">
+
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li><a href="/">Home</a></li>
+        {% for c in crumbs %}
+          <li>
+            {% if loop.last %}
+              <span aria-current="page">{{ c.slug | titleFromSlug }}</span>
+            {% else %}
+              <a href="{{ c.url }}">{{ c.slug | titleFromSlug }}</a>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ol>
+    </nav>
+
+    <div class="article__body markdown-body">
+      {{ content | safe }}
+    </div>
+
+    {% if children.length %}
+    <section class="related related--children" aria-labelledby="related-children-h">
+      <h2 id="related-children-h" class="related__title">
+        {% if isPillarHub %}Explore this pillar{% else %}Continue reading{% endif %}
+      </h2>
+      <ul class="related__grid">
+        {% for c in children %}
+          <li class="related__card">
+            <a href="{{ c.url }}">
+              <span class="related__card-title">{{ c.data.title }}</span>
+              <span class="related__card-desc">{{ c.data.description }}</span>
+              <span class="related__card-cta">Read more {{ icon("arrow-right") }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if siblings.length and not isPillarHub %}
+    <section class="related related--siblings" aria-labelledby="related-siblings-h">
+      <h2 id="related-siblings-h" class="related__title">Related in this section</h2>
+      <ul class="related__list">
+        {% for s in siblings %}
+          <li><a href="{{ s.url }}">{{ s.data.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if not isPillarHub and pillarObj %}
+    <nav class="article__pillar-back" aria-label="Section">
+      <a href="/{{ pillarObj.slug }}/">{{ icon("layers") }} Back to {{ pillarObj.title }}</a>
+    </nav>
+    {% endif %}
+
+  </div>
+</article>
