@@ -8,18 +8,15 @@ Native GIS formats assume immutable file paths and static schemas. A `.qix` quad
 
 ## Delta Indexing Mechanics and the Versioning Conflict
 
-Delta Lake does not maintain a separate spatial index structure. Instead, it relies on data skipping via column-level min/max statistics and file-level Z-ordering. Under [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/), spatial data is stored as structured binary (WKB) or nested WKT strings rather than first-class GIS primitives. The critical engineering objective is ensuring spatial locality survives across commits. If index generation relies on non-deterministic sampling or implicit Parquet statistics, subsequent `OPTIMIZE` cycles produce divergent spatial partitions, breaking query pruning entirely.
+Delta Lake does not maintain a separate spatial index structure. Instead, it relies on data skipping via column-level min/max statistics and file-level Z-ordering. Under [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/), spatial data is stored as structured binary (WKB) rather than first-class GIS primitives. The critical engineering objective is ensuring spatial locality survives across commits. If index generation relies on non-deterministic sampling or implicit Parquet statistics, subsequent `OPTIMIZE` cycles produce divergent spatial partitions, breaking query pruning entirely.
 
 ## Configuring Deterministic Spatial Clustering
 
-To guarantee pruning survives compaction, you must materialize explicit bounding box columns and enforce deterministic Z-ordering. Delta’s data skipping engine indexes only the first `delta.dataSkippingNumIndexedCols` columns (default: 32). Spatial coordinates must fall within this threshold to be evaluated during scan planning.
+To guarantee pruning survives compaction, you must materialize explicit bounding box columns and enforce deterministic Z-ordering. Delta's data skipping engine indexes only the first `delta.dataSkippingNumIndexedCols` columns (default: 32). Spatial coordinates must fall within this threshold to be evaluated during scan planning.
 
 ### 1. Session & Table Configuration
 ```sql
--- Enable deterministic write optimization and auto-compaction
-SET spark.databricks.delta.optimize.zOrder.enabled = true;
-SET delta.autoOptimize.optimizeWrite = true;
-SET delta.autoOptimize.autoCompact = true;
+-- Enable Parquet filter pushdown (Spark default: true; set explicitly for clarity)
 SET spark.sql.parquet.filterPushdown = true;
 
 -- Create table with explicit spatial bounding box columns
@@ -34,7 +31,9 @@ CREATE TABLE IF NOT EXISTS prod.spatial_assets (
 ) USING DELTA
 TBLPROPERTIES (
   'delta.dataSkippingNumIndexedCols' = '40',
-  'delta.enableDeletionVectors' = 'true'
+  'delta.enableDeletionVectors' = 'true',
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.autoOptimize.autoCompact' = 'true'
 );
 ```
 
@@ -44,44 +43,45 @@ Native GIS parsers often produce non-deterministic floating-point rounding. Use 
 ```python
 import pyspark.sql.functions as F
 from pyspark.sql.types import DoubleType
-import struct
 import shapely.wkb as wkb
 
 @F.udf(returnType=DoubleType())
 def extract_bbox_min_x(wkb_bytes: bytes) -> float:
-    if not wkb_bytes: return None
+    if not wkb_bytes:
+        return None
     geom = wkb.loads(wkb_bytes)
-    return geom.bounds[0]
+    return geom.bounds[0]  # (minx, miny, maxx, maxy)
 
 @F.udf(returnType=DoubleType())
 def extract_bbox_min_y(wkb_bytes: bytes) -> float:
-    if not wkb_bytes: return None
-    geom = wkb.loads(wkb_bytes)
-    return geom.bounds[1]
+    if not wkb_bytes:
+        return None
+    return wkb.loads(wkb_bytes).bounds[1]
 
 @F.udf(returnType=DoubleType())
 def extract_bbox_max_x(wkb_bytes: bytes) -> float:
-    if not wkb_bytes: return None
-    geom = wkb.loads(wkb_bytes)
-    return geom.bounds[2]
+    if not wkb_bytes:
+        return None
+    return wkb.loads(wkb_bytes).bounds[2]
 
 @F.udf(returnType=DoubleType())
 def extract_bbox_max_y(wkb_bytes: bytes) -> float:
-    if not wkb_bytes: return None
-    geom = wkb.loads(wkb_bytes)
-    return geom.bounds[3]
+    if not wkb_bytes:
+        return None
+    return wkb.loads(wkb_bytes).bounds[3]
 
 df = spark.read.format("delta").table("staging.spatial_assets_raw")
-df_with_bbox = df.withColumn("bbox_min_x", extract_bbox_min_x("geom_wkb")) \
-                 .withColumn("bbox_max_x", extract_bbox_max_x("geom_wkb")) \
-                 .withColumn("bbox_min_y", extract_bbox_min_y("geom_wkb")) \
-                 .withColumn("bbox_max_y", extract_bbox_max_y("geom_wkb"))
+df_with_bbox = df \
+    .withColumn("bbox_min_x", extract_bbox_min_x("geom_wkb")) \
+    .withColumn("bbox_min_y", extract_bbox_min_y("geom_wkb")) \
+    .withColumn("bbox_max_x", extract_bbox_max_x("geom_wkb")) \
+    .withColumn("bbox_max_y", extract_bbox_max_y("geom_wkb"))
 
 df_with_bbox.write.format("delta").mode("overwrite").saveAsTable("prod.spatial_assets")
 ```
 
 ### 3. Compaction with Spatial Z-Ordering
-Z-ordering maps multi-dimensional spatial locality to linear file storage using a Hilbert curve approximation. This must be executed deterministically after every major ingestion cycle.
+Z-ordering maps multi-dimensional spatial locality to linear file storage using a space-filling curve approximation. Execute deterministically after every major ingestion cycle.
 
 ```sql
 OPTIMIZE prod.spatial_assets
@@ -90,23 +90,23 @@ ZORDER BY (bbox_min_x, bbox_max_x, bbox_min_y, bbox_max_y);
 
 ## Debugging Pruning Failures & Query Plan Validation
 
-When spatial filters fail to prune, the execution plan will show `Scan parquet prod.spatial_assets` with empty `PushedFilters`. Follow this deterministic validation workflow:
+When spatial filters fail to prune, the execution plan will show `Scan parquet prod.spatial_assets` with empty `PushedFilters`. Follow this validation workflow:
 
 1. **Verify Data Skipping Coverage**: Confirm bounding box columns are within the indexed column limit.
- ```sql
+   ```sql
    SHOW TBLPROPERTIES prod.spatial_assets ('delta.dataSkippingNumIndexedCols');
    ```
 2. **Analyze Query Plan**: Run `EXPLAIN FORMATTED` on the target query.
- ```sql
+   ```sql
    EXPLAIN FORMATTED
    SELECT * FROM prod.spatial_assets
    WHERE bbox_min_x > -74.0 AND bbox_max_x < -73.9
      AND bbox_min_y > 40.7 AND bbox_max_y < 40.8;
    ```
 3. **Identify Failure Points**:
- - **Missing `DataFilters`**: The predicate uses unsupported operators (e.g., `ST_Intersects` instead of bounding box overlap). Rewrite to explicit coordinate range filters.
- - **Missing `PartitionFilters`**: Z-order columns do not match the filter predicate order. Delta’s optimizer requires exact column alignment for spatial pruning.
- - **Stale Statistics**: Run `ANALYZE TABLE prod.spatial_assets COMPUTE STATISTICS FOR ALL COLUMNS` if min/max stats diverge from actual data.
+   - **Missing `DataFilters`**: The predicate uses an unsupported operator (e.g., raw `ST_Intersects` without bbox pre-filter). Rewrite to explicit coordinate range filters before the geometry UDF.
+   - **Missing `PartitionFilters`**: The Z-order columns do not match the filter predicate order. Delta's optimizer requires the column appears in the Z-order specification.
+   - **Stale Statistics**: Run `OPTIMIZE prod.spatial_assets ZORDER BY (bbox_min_x, bbox_max_x, bbox_min_y, bbox_max_y)` to regenerate statistics.
 4. **Resolution**: Re-run `OPTIMIZE ... ZORDER BY` with the exact column sequence used in production predicates. Never execute `VACUUM` until pruning validation confirms file-level locality.
 
 ## Automated Index Maintenance Pipeline
@@ -118,24 +118,32 @@ Spatial locality degrades as append-only writes fragment Z-ordered blocks. Imple
 from pyspark.sql import SparkSession
 
 def run_spatial_compaction(spark: SparkSession, table_name: str, zorder_cols: list):
-    # 1. Identify files exceeding fragmentation threshold
-    spark.sql(f"OPTIMIZE {table_name} WHERE _metadata.file_size < 104857600")
-    
-    # 2. Re-cluster spatial columns deterministically
     zorder_clause = ", ".join(zorder_cols)
+
+    # Compact and re-cluster spatial columns deterministically
     spark.sql(f"OPTIMIZE {table_name} ZORDER BY ({zorder_clause})")
-    
-    # 3. Validate pruning efficiency post-compaction
-    explain_plan = spark.sql(f"EXPLAIN FORMATTED SELECT 1 FROM {table_name} WHERE bbox_min_x IS NOT NULL").collect()
-    if "DataFilters" not in str(explain_plan):
-        raise RuntimeError("Spatial pruning invalidated. Check Z-order alignment and data skipping limits.")
+
+    # Validate pruning efficiency post-compaction
+    explain_plan = spark.sql(
+        f"EXPLAIN FORMATTED SELECT 1 FROM {table_name} WHERE bbox_min_x > -180"
+    ).collect()
+    plan_text = str(explain_plan)
+    if "PushedFilters" not in plan_text or "DataFilters" not in plan_text:
+        raise RuntimeError(
+            "Spatial pruning not confirmed. Check Z-order alignment and data skipping limits."
+        )
+    print(f"Compaction complete for {table_name}. Pruning validated.")
 
 if __name__ == "__main__":
     spark = SparkSession.builder.getOrCreate()
-    run_spatial_compaction(spark, "prod.spatial_assets", ["bbox_min_x", "bbox_max_x", "bbox_min_y", "bbox_max_y"])
+    run_spatial_compaction(
+        spark,
+        "prod.spatial_assets",
+        ["bbox_min_x", "bbox_max_x", "bbox_min_y", "bbox_max_y"]
+    )
 ```
 
-Schedule this pipeline via Delta Live Tables or cloud-native orchestrators (Airflow, Step Functions) with a 6–12 hour cadence. Monitor `delta.logRetentionDuration` and `delta.deletedFileRetentionDuration` to ensure transaction log consistency during concurrent spatial queries.
+Schedule this pipeline via cloud-native orchestrators (Airflow, Step Functions) or Delta Live Tables with a 6–12 hour cadence. Monitor `delta.logRetentionDuration` and `delta.deletedFileRetentionDuration` to ensure transaction log consistency during concurrent spatial queries.
 
 ## Conclusion
 

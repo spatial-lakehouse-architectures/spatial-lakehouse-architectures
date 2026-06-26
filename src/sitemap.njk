@@ -6,12 +6,14 @@ eleventyExcludeFromCollections: true
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>{{ site.url }}/</loc>
+    <lastmod>{{ page.date | dateYMD }}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   {%- for item in collections.content -%}
   <url>
     <loc>{{ item.url | absoluteUrl }}</loc>
+    <lastmod>{{ item.date | dateYMD }}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>

@@ -32,7 +32,7 @@ module.exports = {
           .replace(/`([^`]+)`/g, "$1")
           .replace(/\s+/g, " ")
           .trim();
-        return clean.length > 200 ? clean.slice(0, 197).trimEnd() + "…" : clean;
+        return clean.length > 160 ? clean.slice(0, 157).trimEnd() + "…" : clean;
       } catch (e) {
         return "";
       }
@@ -53,16 +53,24 @@ module.exports = {
       return slug;
     },
     seoTitle: (data) => {
+      // Respect explicit seoTitle set in frontmatter via _seoTitle key
+      if (data._seoTitle) return data._seoTitle;
       const url = (data.page && data.page.url) || "";
       const parts = url.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
       if (parts.length === 1 && data.site && Array.isArray(data.site.pillars)) {
         const match = data.site.pillars.find((p) => p.slug === parts[0]);
-        if (match) return match.title;
+        if (match) {
+          // Strip &amp; and other HTML entities for proper length
+          const title = match.title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+          return title;
+        }
       }
       const t = data.title || "";
       if (!t) return "";
       const beforeColon = t.split(":")[0].trim();
       if (beforeColon.length >= 20 && beforeColon.length < t.length) return beforeColon;
+      // Truncate if still too long (keep under 46 chars so total stays ≤65 with suffix)
+      if (t.length > 46) return t.slice(0, 43).trimEnd() + "…";
       return t;
     },
   },

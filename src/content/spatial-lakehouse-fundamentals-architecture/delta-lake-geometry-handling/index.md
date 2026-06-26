@@ -31,7 +31,7 @@ Unlike Apache Iceberg, which has moved toward native spatial type extensions and
 
 ```python
 from pyspark.sql.functions import udf
-from pyspark.sql.types import BooleanType, BinaryType
+from pyspark.sql.types import BooleanType
 import struct
 
 def validate_wkb(wkb_bytes: bytes) -> bool:
@@ -68,7 +68,7 @@ Implement `ZORDER` clustering on the four bounding box coordinates to enable mul
 OPTIMIZE spatial_assets ZORDER BY (bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y);
 ```
 
-For streaming or high-churn workloads, precompute a geohash or H3 index column during ETL and partition by that column at the directory level. H3 resolution 8 provides ~0.74 km² cells, which balances partition granularity with file count. This reduces the number of files scanned during spatial joins by 70–90% in typical urban-scale datasets:
+For streaming or high-churn workloads, precompute a geohash or H3 index column during ETL and partition by that column at the directory level. H3 resolution 8 provides approximately 0.74 km² cells, which balances partition granularity with file count. This reduces the number of files scanned during spatial joins by 70–90% in typical urban-scale datasets:
 
 ```sql
 -- Partition by H3 index for streaming ingestion
@@ -88,7 +88,7 @@ LOCATION 's3://data-lake/spatial/assets_stream';
 Delta does not ship with native spatial indexes. Query performance depends on explicit predicate pushdown, Z-ORDER clustering, and join broadcast strategies. When executing spatial joins, always materialize bounding box predicates before invoking expensive geometry UDFs:
 
 ```sql
--- Efficient spatial join pattern
+-- Efficient spatial join pattern: bbox filter first, then geometry UDF
 SELECT a.asset_id, b.zone_name
 FROM spatial_assets a
 JOIN spatial_zones b
@@ -104,30 +104,41 @@ The initial bounding box filter leverages Delta's min/max statistics to skip irr
 Delta's transaction log (`_delta_log`) grows with every write operation. Unmanaged logs degrade query planning performance and storage efficiency. Implement automated maintenance with explicit retention windows:
 
 ```sql
--- Compact small files and reclaim storage
+-- Compact small files and rebuild Z-order clustering
 OPTIMIZE spatial_assets ZORDER BY (bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y);
 
 -- Remove expired transaction log entries and orphaned data files
-VACUUM spatial_assets RETAIN 720 HOURS;
+-- VACUUM requires a separate statement from OPTIMIZE
+VACUUM spatial_assets RETAIN 720 HOURS;  -- 30 days
 ```
 
-For CI/CD integration, schedule maintenance via GitHub Actions using Databricks CLI or Delta Lake's REST API. The following workflow ensures consistent compaction and log pruning:
+For CI/CD integration, schedule maintenance via GitHub Actions using the Databricks CLI. The following workflow ensures consistent compaction and log pruning:
 
 ```yaml
 name: delta-spatial-maintenance
 on:
   schedule:
-    - cron: '0 2 * * 0' # Weekly at 02:00 UTC
+    - cron: '0 2 * * 0' # Weekly at 02:00 UTC Sunday
   workflow_dispatch:
 
 jobs:
   optimize-vacuum:
     runs-on: ubuntu-latest
     steps:
-      - name: Run OPTIMIZE & VACUUM via Databricks CLI
+      - name: Run OPTIMIZE via Databricks CLI
         run: |
-          databricks sql query execute --warehouse-id $WAREHOUSE_ID \
-            --json '{"statement": "OPTIMIZE spatial_assets ZORDER BY (bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y); VACUUM spatial_assets RETAIN 720 HOURS;"}'
+          databricks sql statement execute \
+            --warehouse-id "$WAREHOUSE_ID" \
+            --statement "OPTIMIZE spatial_assets ZORDER BY (bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y)"
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+      - name: Run VACUUM via Databricks CLI
+        run: |
+          databricks sql statement execute \
+            --warehouse-id "$WAREHOUSE_ID" \
+            --statement "VACUUM spatial_assets RETAIN 720 HOURS"
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -140,24 +151,24 @@ Transaction log pruning must align with your compliance and time-travel requirem
 
 ### 1. Predicate Pushdown Bypass
 **Symptom:** Queries scan all files despite explicit `WHERE bbox_min_x > ...` filters.
-**Root Cause:** Missing Z-ORDER, stale statistics, or untyped `DOUBLE` columns.
-**Resolution:** 
+**Root Cause:** Missing Z-ORDER, stale statistics, or columns typed as `STRING` or `DECIMAL` instead of `DOUBLE`.
+**Resolution:**
 - Run `OPTIMIZE ... ZORDER BY` immediately after bulk loads.
-- Verify column types are strictly `DOUBLE` (not `STRING` or `DECIMAL`).
-- Force statistics refresh: `ANALYZE TABLE spatial_assets COMPUTE STATISTICS FOR COLUMNS bbox_min_x, bbox_min_y, bbox_max_x, bbox_max_y;` (Note: Delta auto-collects stats, but explicit `COMPUTE STATISTICS` can help after schema migrations).
+- Verify column types are strictly `DOUBLE`.
+- Delta auto-collects column statistics during writes. After schema migrations, re-run `OPTIMIZE` to regenerate min/max stats for new columns.
 
 ### 2. WKB Header Corruption
 **Symptom:** `ST_Intersects` or custom UDFs fail with `ArrayIndexOutOfBoundsException` or `Invalid WKB format`.
 **Root Cause:** Mixed ingestion formats (WKT/GeoJSON mixed with WKB) or truncated binary payloads from Kafka/JSON deserialization.
-**Resolution:** 
+**Resolution:**
 - Enforce the validation UDF at the ingestion layer.
-- Use `spark.sql.parquet.binaryAsString=false` to prevent automatic type coercion.
-- Audit raw payloads with `hex(geom)` to verify the first byte is `00` or `01`.
+- Set `spark.sql.parquet.binaryAsString=false` to prevent automatic type coercion.
+- Audit raw payloads with `hex(geom)` to verify the first byte is `00` (big-endian) or `01` (little-endian).
 
 ### 3. Z-ORDER Skew & Write Amplification
 **Symptom:** `OPTIMIZE` jobs exceed timeout thresholds; small files proliferate.
 **Root Cause:** Highly skewed spatial distribution (e.g., 80% of data in a single urban H3 cell).
-**Resolution:** 
+**Resolution:**
 - Switch from Z-ORDER to partitioning by `h3_index` for streaming workloads.
 - Increase `spark.databricks.delta.optimizeWrite.numShuffleBlocks` to 200–400.
 - Implement incremental compaction: `OPTIMIZE spatial_assets WHERE h3_index IN ('88283082bffffff', '88283082cffffff');`
@@ -165,9 +176,9 @@ Transaction log pruning must align with your compliance and time-travel requirem
 ### 4. Transaction Log Bloat
 **Symptom:** Query planning latency increases linearly over time; `_delta_log` directory exceeds 50GB.
 **Root Cause:** High-frequency micro-batches without `VACUUM` or checkpoint consolidation.
-**Resolution:** 
-- Schedule `VACUUM` weekly with `RETAIN 30 DAYS`.
-- Set `spark.databricks.delta.checkpointInterval = 10` to force more frequent checkpointing.
+**Resolution:**
+- Schedule `VACUUM spatial_assets RETAIN 720 HOURS` weekly.
+- Set `delta.checkpointInterval = 10` to force more frequent checkpointing.
 - Enable deletion vectors (`delta.enableDeletionVectors = true`) to reduce tombstone accumulation.
 
 Delta Lake geometry handling demands explicit engineering discipline. By enforcing WKB serialization, leveraging bounding box clustering, and automating transaction log maintenance, data teams can achieve sub-second spatial query performance while maintaining cloud-native scalability.

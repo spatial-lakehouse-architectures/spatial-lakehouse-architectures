@@ -9,15 +9,16 @@ Traditional spatial partitioning (H3, S2, or bounding-box grids) directly impact
 When spatial indexes like Z-order curves or GeoParquet metadata are applied, verify that index manifest files do not leak coordinate bounds to unauthorized principals. Debug index exposure by auditing catalog metadata:
 ```sql
 DESCRIBE EXTENDED analytics.gis_infrastructure_assets;
--- Inspect the 'statistics' column for raw bounding box values (min_x, max_x, min_y, max_y)
+-- Inspect the 'statistics' section for raw bounding box values (min_x, max_x, min_y, max_y)
+-- If exposed, switch to partition-level aggregation using coarse grid references
 ```
-If exposed, configure catalog-level metadata masking or switch to partition-level aggregation that only publishes coarse grid references. Always normalize geometries to a consistent CRS (e.g., `EPSG:4326` for global storage, `EPSG:3857` for web rendering) before partitioning to prevent coordinate drift across security zones.
+Always normalize geometries to a consistent CRS (e.g., `EPSG:4326` for global storage) before partitioning to prevent coordinate drift across security zones.
 
 ## Format-Specific Security Controls
 
-The choice between Apache Iceberg and Delta Lake dictates how spatial types are serialized, versioned, and secured. Iceberg’s native support for complex types and schema evolution allows for precise column-level masking of geometry fields without breaking downstream consumers. When leveraging [Iceberg Spatial Type Support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/), engineers must configure manifest-level compression and restrict catalog read permissions to metadata-scoped roles. Iceberg’s manifest structure can expose bounding box metadata even when geometry columns are masked at query time, so enforce `iceberg.metadata.compression=snappy` and apply catalog-level ACLs aligned with [Apache Iceberg Security Documentation](https://iceberg.apache.org/docs/latest/spark-security/).
+The choice between Apache Iceberg and Delta Lake dictates how spatial types are serialized, versioned, and secured. Iceberg's native support for complex types and schema evolution allows for precise column-level masking of geometry fields without breaking downstream consumers. When leveraging [Iceberg Spatial Type Support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/), engineers must restrict catalog read permissions to metadata-scoped roles. Iceberg's manifest structure can expose bounding box metadata even when geometry columns are masked at query time, so apply catalog-level ACLs aligned with [Apache Iceberg Security Documentation](https://iceberg.apache.org/docs/latest/spark-security/).
 
-Conversely, Delta Lake relies on Parquet’s native geometry encoding and transaction log management. Delta’s `_delta_log` directory must be explicitly isolated from public read access. Configure Delta tables with `delta.enableChangeDataFeed=true` only for audited roles, and enforce `delta.columnMapping.mode=name` to prevent schema inference attacks. For detailed encoding constraints and transaction log hardening, refer to [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/). Both formats require explicit Parquet footer encryption when storing high-precision coordinates.
+Delta Lake relies on Parquet's native geometry encoding and transaction log management. Delta's `_delta_log` directory must be explicitly isolated from public read access. Configure Delta tables with `delta.enableChangeDataFeed=true` only for audited roles, and enforce `delta.columnMapping.mode=name` to prevent schema inference attacks. For detailed encoding constraints and transaction log hardening, refer to [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/). Both formats require explicit Parquet footer encryption when storing high-precision coordinates.
 
 ## Row-Level Enforcement and Dynamic Geometry Masking
 
@@ -35,6 +36,7 @@ SELECT
 FROM raw.gis_assets
 WHERE security_zone = current_user_zone();
 ```
+
 For Python-based validation pipelines, use `shapely` and `pyarrow` to enforce precision thresholds before writing to the lakehouse:
 ```python
 import pyarrow.parquet as pq
@@ -43,8 +45,12 @@ from shapely.ops import transform as shp_transform
 
 def mask_geometry_precision(wkb_bytes: bytes, precision: int = 4) -> bytes:
     geom = wkb.loads(wkb_bytes)
+
     def round_coords(x, y, z=None):
-        return (round(x, precision), round(y, precision), *(round(z, precision) if z else ()))
+        if z is not None:
+            return (round(x, precision), round(y, precision), round(z, precision))
+        return (round(x, precision), round(y, precision))
+
     masked = shp_transform(round_coords, geom)
     return masked.wkb
 
@@ -53,7 +59,7 @@ def mask_geometry_precision(wkb_bytes: bytes, precision: int = 4) -> bytes:
 
 ## CI/CD Policy Validation and Infrastructure Guardrails
 
-Security boundaries must be codified and validated before deployment. Use Open Policy Agent (OPA) or custom Python validators in CI/CD to enforce partition alignment, CRS consistency, and metadata exposure limits. Example GitHub Actions workflow:
+Security boundaries must be codified and validated before deployment. Use Open Policy Agent (OPA) or custom Python validators in CI/CD to enforce partition alignment, CRS consistency, and metadata exposure limits:
 ```yaml
 name: Validate Spatial Security Boundaries
 on: [pull_request]
@@ -68,7 +74,8 @@ jobs:
           import json, sys
           policy = json.load(open('security/policy.json'))
           table_meta = json.load(open('table_metadata.json'))
-          assert table_meta['partition_columns'][0] in policy['allowed_partitions'], 'Partition violates security boundary'
+          assert table_meta['partition_columns'][0] in policy['allowed_partitions'], \
+              'Partition violates security boundary'
           assert table_meta['srs'] == 'EPSG:4326', 'CRS mismatch detected'
           print('Security validation passed')
           "
@@ -83,13 +90,13 @@ Spatial tables require specialized maintenance routines. Standard `VACUUM` or `O
 
 **Troubleshooting Matrix:**
 - *Symptom:* Query returns high-precision coordinates despite masking policy.
- *Root Cause:* Predicate pushdown bypasses view-level masking due to direct table access.
- *Fix:* Enforce catalog-level row filters (`spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension`) and disable direct table access for non-admin roles.
+  *Root Cause:* Predicate pushdown bypasses view-level masking due to direct table access.
+  *Fix:* Enforce catalog-level row filters and disable direct table access for non-admin roles. In Databricks, use Unity Catalog row filters; in open-source deployments, use Apache Ranger or OPA Gatekeeper.
 - *Symptom:* Spatial index drift causes partition pruning failures.
- *Root Cause:* Mixed CRS across partitions or unaligned Z-order curves.
- *Fix:* Run `ST_Transform(geom, 'EPSG:3857', 'EPSG:4326')` during ingestion and rebuild spatial indexes with `OPTIMIZE ... ZORDER BY (security_zone, region)`.
+  *Root Cause:* Mixed CRS across partitions or unaligned Z-order curves.
+  *Fix:* Standardize to a single CRS during ingestion (`ST_Transform` to `EPSG:4326`) and rebuild spatial indexes with `OPTIMIZE ... ZORDER BY (security_zone, region)`.
 - *Symptom:* GeoParquet metadata leaks bounding boxes in catalog UI.
- *Root Cause:* Unencrypted Parquet footers and exposed `geo` schema.
- *Fix:* Enable footer encryption (`parquet.encryption.footer.key`), strip `geo` metadata via `pyarrow.parquet.write_table(..., metadata=None)`, and restrict catalog `DESCRIBE` privileges.
+  *Root Cause:* Unencrypted Parquet footers and exposed `geo` schema.
+  *Fix:* Enable footer encryption (`parquet.encryption.footer.key`), strip `geo` metadata via `pyarrow.parquet.write_table(..., schema=schema_without_geo_metadata)`, and restrict catalog `DESCRIBE` privileges.
 
-For authoritative guidance on spatial metadata standards and coordinate precision handling, consult the [OGC GeoParquet Specification v1.0.0](https://geoparquet.org/releases/v1.0.0/).
+For authoritative guidance on spatial metadata standards and coordinate precision handling, consult the [OGC GeoParquet Specification v1.1.0](https://geoparquet.org/releases/v1.1.0/).

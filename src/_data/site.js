@@ -25,7 +25,7 @@ module.exports = {
       summary:
         "Hierarchical grids, Z-ordering, Hilbert curves, predicate pushdown, and raster/vector hybrid layouts engineered for sub-second queries at petabyte scale.",
       icon: "grid",
-      color: "#3f8c5e",
+      color: "#2f6e49",
     },
     {
       slug: "python-ecosystem-integration-workflows",
@@ -33,7 +33,7 @@ module.exports = {
       summary:
         "Arrow schemas, PyIceberg, delta-rs, async catalog orchestration, and CI/CD validation — the Python contract that keeps spatial pipelines reproducible and fast.",
       icon: "python",
-      color: "#c87a1f",
+      color: "#9a5a17",
     },
   ],
 };

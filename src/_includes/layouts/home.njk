@@ -37,6 +37,27 @@ layout: layouts/base.njk
   </div>
 </section>
 
+<section class="featured container">
+  <div class="featured__head">
+    <h2 class="section-title">Start here</h2>
+    <p class="featured__lead">The most-referenced engineering deep-dives — battle-tested patterns, troubleshooting matrices, and copy-ready configurations across every pillar.</p>
+  </div>
+  <div class="featured__grid">
+    {% for item in collections.content | deepGuides %}
+      {% set p = site.pillars | pillarBySlug(item.data.pillarSlug) %}
+      <article class="featured-card" style="--pillar-color: {{ p.color if p else site.themeColor }}">
+        <span class="featured-card__pillar">
+          {% if p %}{{ icon(p.icon) }}{% endif %}
+          <a href="/{{ item.data.pillarSlug }}/">{{ p.title if p else item.data.pillarSlug }}</a>
+        </span>
+        <h3 class="featured-card__title"><a href="{{ item.url }}">{{ item.data.title }}</a></h3>
+        <p class="featured-card__desc">{{ item.data.description }}</p>
+        <a class="featured-card__cta" href="{{ item.url }}">Read the guide {{ icon("arrow-right") }}</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="pillars container">
   <h2 class="section-title">Explore the pillars</h2>
   <div class="pillars__grid">

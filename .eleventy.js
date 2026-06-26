@@ -61,6 +61,7 @@ module.exports = function (eleventyConfig) {
   eleventyConfig.addPassthroughCopy({ "src/manifest.webmanifest": "manifest.webmanifest" });
   eleventyConfig.addPassthroughCopy({ "src/sw.js": "sw.js" });
   eleventyConfig.addPassthroughCopy({ "src/robots.txt": "robots.txt" });
+  eleventyConfig.addPassthroughCopy({ "src/fcea9306acc01a8dffd3f4d4e11a3b1d.txt": "fcea9306acc01a8dffd3f4d4e11a3b1d.txt" });
 
   // Markdown configuration
   const md = markdownIt({
@@ -97,8 +98,11 @@ module.exports = function (eleventyConfig) {
       if (!m) continue;
       const checked = m[1].toLowerCase() === "x";
       first.content = first.content.slice(m[0].length);
+      const labelText = (first.content || "checklist item").trim().slice(0, 80)
+        .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        || "checklist item";
       const cb = new state.Token("html_inline", "", 0);
-      cb.content = `<input type="checkbox" class="task-list-checkbox"${checked ? " checked" : ""}> `;
+      cb.content = `<input type="checkbox" class="task-list-checkbox" disabled aria-label="${labelText}"${checked ? " checked" : ""}> `;
       inline.children.unshift(cb);
       // tag list item & its parent <ul> for CSS targeting
       grand.attrJoin("class", "task-list-item");
@@ -125,6 +129,18 @@ module.exports = function (eleventyConfig) {
     return defaultTableClose(...args) + `</div>`;
   };
 
+  // ----- Custom: fenced code blocks -----
+  // Our `highlight` returns a full `.code-block` wrapper (not starting with `<pre`),
+  // so markdown-it's default fence renderer would double-wrap it in an extra
+  // `<pre><code>` that lacks `overflow-x:auto` and overflows the viewport. Render
+  // the fence output directly instead.
+  md.renderer.rules.fence = function (tokens, idx) {
+    const token = tokens[idx];
+    const info = token.info ? md.utils.unescapeAll(token.info).trim() : "";
+    const lang = info.split(/\s+/g)[0] || "";
+    return highlight(token.content, lang) + "\n";
+  };
+
   eleventyConfig.setLibrary("md", md);
 
   // ----- Filters -----
@@ -135,6 +151,7 @@ module.exports = function (eleventyConfig) {
   });
 
   eleventyConfig.addFilter("dateIso", (d) => new Date(d || Date.now()).toISOString());
+  eleventyConfig.addFilter("dateYMD", (d) => new Date(d || Date.now()).toISOString().slice(0, 10));
 
   eleventyConfig.addFilter("breadcrumb", (url) => {
     if (!url || url === "/") return [];
@@ -172,6 +189,22 @@ module.exports = function (eleventyConfig) {
       const rest = item.url.slice(hub.length).replace(/\/$/, "");
       return rest.length > 0 && !rest.includes("/");
     });
+  });
+
+  // Deepest "leaf" guides (3 URL segments) — the strongest deep-dive pages.
+  eleventyConfig.addFilter("deepGuides", (collection, limit) => {
+    if (!Array.isArray(collection)) return [];
+    const guides = collection.filter((item) => {
+      if (!item.url) return false;
+      const parts = item.url.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+      return parts.length === 3;
+    });
+    return typeof limit === "number" ? guides.slice(0, limit) : guides;
+  });
+
+  eleventyConfig.addFilter("pillarBySlug", (pillars, slug) => {
+    if (!Array.isArray(pillars)) return null;
+    return pillars.find((p) => p.slug === slug) || null;
   });
 
   eleventyConfig.addFilter("siblingsOf", (collection, currentUrl) => {
