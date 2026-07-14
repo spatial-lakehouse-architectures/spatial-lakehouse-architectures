@@ -8,7 +8,7 @@
     "build": "eleventy",
     "serve": "eleventy --serve --quiet",
     "debug": "DEBUG=Eleventy* eleventy",
-    "deploy": "npm run build && wrangler pages deploy _site --project-name=spatial-lakehouse-architectures --commit-dirty=true",
+    "deploy": "npm run build && wrangler pages deploy _site --project-name=spatial-lakehouse-architectures --branch=main --commit-dirty=true",
     "deploy:create": "wrangler pages project create spatial-lakehouse-architectures --production-branch=main"
   },
   "devDependencies": {
