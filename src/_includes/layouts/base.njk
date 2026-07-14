@@ -34,8 +34,8 @@
   <meta name="twitter:title" content="{% if headTitle and page.url != '/' %}{{ headTitle }}{% else %}{{ site.name }}{% endif %}">
   <meta name="twitter:description" content="{{ description or site.description }}">
 
-  <link rel="stylesheet" href="/assets/css/site.css">
-  <link rel="stylesheet" href="/assets/css/katex.min.css">
+  <link rel="stylesheet" href="/assets/css/site.css?v={{ assets.site_css }}">
+  <link rel="stylesheet" href="/assets/css/katex.min.css?v={{ assets.katex_css }}">
 
   {% if page.url == "/" %}
   <script type="application/ld+json">
@@ -116,6 +116,6 @@
     {% block content %}{{ content | safe }}{% endblock %}
   </main>
   {% include "partials/footer.njk" %}
-  <script src="/assets/js/site.js" defer></script>
+  <script src="/assets/js/site.js?v={{ assets.site_js }}" defer></script>
 </body>
 </html>

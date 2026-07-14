@@ -1,8 +1,35 @@
-# Foundational Pillar: Spatial Partitioning & Indexing Strategies for Lakehouse Architectures
+# Spatial Partitioning & Indexing Strategies for Lakehouse Architectures
 
 ## Core Architecture & Lakehouse Fundamentals
 
 Modern spatial data platforms have transitioned from proprietary GIS storage (PostGIS, GeoTIFF mosaics, Shapefiles) to open table formats like Apache Iceberg and Delta Lake. This architectural shift redefines how spatial metadata, physical file layout, and query execution interact. In a lakehouse, spatial performance is governed by three planes: object storage (S3/ADLS/GCS), the table format's metadata catalog, and the compute engine's spatial extensions.
+
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A spatial query flowing through partition pruning and bbox file-skipping: query window, catalog manifest filter prunes partitions, file-level bbox min max stats skip files, and only surviving Parquet files are scanned">
+<defs>
+<marker id="part-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="760" height="230" fill="#f7fbfc"/>
+<text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Partition prune, then bbox file-skip</text>
+<rect x="15" y="58" width="165" height="86" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="97" y="90" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Query window</text>
+<text x="97" y="112" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">ST_Intersects(bbox)</text>
+<rect x="210" y="58" width="165" height="86" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="292" y="90" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Manifest filter</text>
+<text x="292" y="112" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">prune partitions</text>
+<rect x="405" y="58" width="165" height="86" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="487" y="90" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Bbox min/max</text>
+<text x="487" y="112" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">skip files</text>
+<rect x="600" y="58" width="145" height="86" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="672" y="90" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Scan Parquet</text>
+<text x="672" y="112" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">surviving files</text>
+<line x1="180" y1="101" x2="210" y2="101" stroke="#0e6e7d" stroke-width="2" marker-end="url(#part-arrow)"/>
+<line x1="375" y1="101" x2="405" y2="101" stroke="#0e6e7d" stroke-width="2" marker-end="url(#part-arrow)"/>
+<line x1="570" y1="101" x2="600" y2="101" stroke="#0e6e7d" stroke-width="2" marker-end="url(#part-arrow)"/>
+<text x="380" y="185" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="600" fill="#0d3b45">1,000 files &#8594; 40 after partition prune &#8594; 6 after bbox skip</text>
+<text x="380" y="206" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Every stage discards non-overlapping data before any geometry is deserialized</text>
+</svg>
+</figure>
 
 Unlike traditional RDBMS spatial indexes that maintain in-memory or on-disk tree structures (GiST, R-tree), lakehouse architectures rely on partition metadata, column-level statistics, and file-level clustering to achieve spatial selectivity. The catalog tracks min/max bounding boxes and CRS metadata per data file. Query engines leverage this metadata to prune scans before deserializing geometries. This model eliminates index bloat and enables concurrent reads/writes, but it demands deliberate partitioning strategies, explicit clustering configurations, and strict operational boundaries to prevent performance degradation.
 

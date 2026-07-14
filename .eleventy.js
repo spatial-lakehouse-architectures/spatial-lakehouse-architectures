@@ -48,7 +48,7 @@ function wrapCodeBlock(htmlContent, lang) {
     (label ? `<span class="code-block__lang">${escapeHtml(label)}</span>` : `<span class="code-block__lang"></span>`) +
     `<button type="button" class="code-block__copy" aria-label="Copy code">Copy</button>` +
     `</div>` +
-    `<pre class="hljs"><code class="language-${escapeHtml(lang)}">${htmlContent}</code></pre>` +
+    `<pre class="hljs" tabindex="0" role="group" aria-label="${escapeHtml(label || "code")} code sample"><code class="language-${escapeHtml(lang)}">${htmlContent}</code></pre>` +
     `</div>`
   );
 }

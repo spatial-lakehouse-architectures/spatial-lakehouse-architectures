@@ -35,5 +35,13 @@ module.exports = {
       icon: "python",
       color: "#9a5a17",
     },
+    {
+      slug: "spatial-query-engines-compute",
+      title: "Spatial Query Engines & Compute Optimization",
+      summary:
+        "DuckDB, Trino, and Apache Sedona against lakehouse tables — spatial SQL functions, distributed joins, catalog federation, and the benchmarks that decide which engine owns each workload.",
+      icon: "cpu",
+      color: "#6a3d9a",
+    },
   ],
 };

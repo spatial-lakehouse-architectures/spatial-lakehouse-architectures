@@ -1,5 +1,5 @@
 /* Spatial Lakehouse Architectures — service worker */
-const VERSION = "v1";
+const VERSION = "v2";
 const PRECACHE = `sla-precache-${VERSION}`;
 const RUNTIME = `sla-runtime-${VERSION}`;
 

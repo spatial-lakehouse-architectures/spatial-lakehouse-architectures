@@ -2,6 +2,36 @@
 
 The Python ecosystem functions as the primary integration and orchestration fabric for modern spatial data lakehouses. While table formats like Apache Iceberg and Delta Lake enforce transactional guarantees, schema evolution, and catalog metadata, Python bridges the gap between raw geospatial ingestion, analytical transformation, and downstream consumption. These integration workflows establish the architectural contracts, compute boundaries, and operational guardrails required to run production-grade spatial workflows without compromising query performance, data integrity, or infrastructure efficiency.
 
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The Python write contract for spatial tables: in-memory GeoPandas geometry passes through Apache Arrow as the zero-copy interchange layer to PyIceberg and delta-rs writers, into the open table format, with a CI/CD validation gate guarding commits">
+<defs>
+<marker id="py-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="760" height="230" fill="#f7fbfc"/>
+<text x="380" y="26" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The Python write contract for spatial tables</text>
+<rect x="15" y="50" width="165" height="80" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="97" y="82" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">GeoPandas</text>
+<text x="97" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">GeoDataFrame</text>
+<rect x="210" y="50" width="165" height="80" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="3"/>
+<text x="292" y="82" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Apache Arrow</text>
+<text x="292" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">zero-copy interchange</text>
+<rect x="405" y="50" width="165" height="80" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="487" y="82" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">PyIceberg / delta-rs</text>
+<text x="487" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">table writers</text>
+<rect x="600" y="50" width="145" height="80" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="672" y="82" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Open table</text>
+<text x="672" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">Iceberg / Delta</text>
+<line x1="180" y1="90" x2="210" y2="90" stroke="#0e6e7d" stroke-width="2" marker-end="url(#py-arrow)"/>
+<line x1="375" y1="90" x2="405" y2="90" stroke="#0e6e7d" stroke-width="2" marker-end="url(#py-arrow)"/>
+<line x1="570" y1="90" x2="600" y2="90" stroke="#0e6e7d" stroke-width="2" marker-end="url(#py-arrow)"/>
+<rect x="475" y="160" width="220" height="46" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="585" y="182" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">CI/CD validation gate</text>
+<text x="585" y="199" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">schema · CRS · bbox checks</text>
+<line x1="585" y1="160" x2="585" y2="133" stroke="#0e6e7d" stroke-width="2" marker-end="url(#py-arrow)"/>
+<text x="245" y="150" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Arrow is the interchange contract between Python geometry and the writers</text>
+</svg>
+</figure>
+
 ## Core Architecture & Type Contracts
 
 At the foundation of any spatial lakehouse is a strict contract between the object storage layer and the distributed compute engine. Python libraries must translate between native spatial representations (WKB, GeoJSON, PostGIS `GEOMETRY`) and the columnar Parquet-backed formats expected by Iceberg or Delta. Misaligned type mappings are the primary cause of silent data corruption during ingestion, particularly when CRS metadata or topology constraints are stripped during serialization. Engineers must enforce explicit Arrow schema declarations and leverage vectorized conversion routines to maintain throughput across distributed workers. The [DataFrame Mapping Strategies](/python-ecosystem-integration-workflows/dataframe-mapping-strategies/) reference details how to align pandas, Polars, and GeoPandas structures with lakehouse schemas while preserving spatial attributes and avoiding implicit type promotion.

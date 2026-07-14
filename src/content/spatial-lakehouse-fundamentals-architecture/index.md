@@ -2,6 +2,41 @@
 
 The transition from monolithic spatial databases to a spatial data lakehouse is not a storage migration; it is a fundamental re-architecture of how geospatial data is serialized, versioned, indexed, and queried at scale. Traditional GIS stacks tightly couple storage, compute, and spatial indexing into a single RDBMS process, creating hard ceilings on concurrency, storage elasticity, and multi-engine interoperability. A spatial lakehouse decouples these planes, anchoring immutable data in cloud object storage while delegating transactional control to open table formats and pushing spatial compute to distributed query engines.
 
+<figure class="diagram">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three decoupled planes of a spatial lakehouse: object storage of GeoParquet and WKB files, the table format and catalog holding metadata, snapshots and bbox stats, and the compute engines Spark, Trino and DuckDB">
+<defs>
+<marker id="fund-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="760" height="230" fill="#f7fbfc"/>
+<text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Decoupled spatial lakehouse stack</text>
+<rect x="20" y="55" width="205" height="130" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="122" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Object storage</text>
+<text x="122" y="99" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">S3 / ADLS / GCS</text>
+<text x="122" y="126" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">GeoParquet files</text>
+<text x="122" y="146" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">WKB geometry columns</text>
+<text x="122" y="166" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">immutable objects</text>
+<rect x="277" y="55" width="205" height="130" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="379" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Table format + catalog</text>
+<text x="379" y="99" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">Iceberg / Delta</text>
+<text x="379" y="126" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">manifest metadata</text>
+<text x="379" y="146" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">snapshots (ACID)</text>
+<text x="379" y="166" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">bbox min/max stats</text>
+<rect x="534" y="55" width="205" height="130" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="636" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Compute engines</text>
+<text x="636" y="99" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">distributed spatial</text>
+<text x="636" y="126" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">Spark + Sedona</text>
+<text x="636" y="146" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">Trino / Presto</text>
+<text x="636" y="166" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">DuckDB spatial</text>
+<text x="251" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">file refs</text>
+<text x="251" y="124" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">+ stats</text>
+<line x1="225" y1="130" x2="277" y2="130" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-arrow)"/>
+<text x="508" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">pruned</text>
+<text x="508" y="124" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">file list</text>
+<line x1="482" y1="130" x2="534" y2="130" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-arrow)"/>
+<text x="380" y="212" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Each plane scales independently; only file references and metadata cross the boundaries</text>
+</svg>
+</figure>
+
 ## The Decoupled Spatial Stack
 
 A production spatial lakehouse operates across three isolated planes:
