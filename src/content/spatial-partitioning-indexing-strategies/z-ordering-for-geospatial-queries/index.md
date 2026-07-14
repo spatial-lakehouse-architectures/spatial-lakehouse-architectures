@@ -2,9 +2,9 @@
 
 ## Architectural Positioning & Core Mechanics
 
-Z-ordering functions as a fine-grained, file-level clustering mechanism that sits directly above coarse directory partitioning in modern lakehouse stacks. By mapping multi-dimensional geospatial coordinates into a single, linear sort key via a space-filling curve (Morton/Z-curve), it ensures that spatially proximate records are physically co-located within Parquet or Delta files. This architecture dramatically reduces I/O for bounding-box filters, proximity searches, and spatial predicates. While foundational [Spatial Partitioning & Indexing Strategies](/spatial-partitioning-indexing-strategies/) reduce scan scope at the directory level, Z-ordering operates within those partitions to maximize data-skipping efficiency.
+Z-ordering functions as a fine-grained, file-level clustering mechanism that sits directly above coarse directory partitioning in modern lakehouse stacks. By mapping multi-dimensional geospatial coordinates into a single, linear sort key via a space-filling curve (Morton/Z-curve), it ensures that spatially proximate records are physically co-located within Parquet or Delta files. This architecture dramatically reduces I/O for bounding-box filters, proximity searches, and spatial predicates. While foundational [Spatial Partitioning & Indexing Strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/) reduce scan scope at the directory level, Z-ordering operates within those partitions to maximize data-skipping efficiency.
 
-The core algorithm interleaves the binary representations of coordinate dimensions. For a 2D point `(x, y)`, the engine extracts bits from each dimension and alternates them (`x₀, y₀, x₁, y₁, ...`). The resulting Z-value preserves spatial locality: points close in geographic space yield numerically adjacent sort keys. Query engines generate file-level min/max statistics on the clustered columns, enabling [Predicate Pushdown Optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) to bypass entire files when the query envelope falls outside the stored value ranges.
+The core algorithm interleaves the binary representations of coordinate dimensions. For a 2D point `(x, y)`, the engine extracts bits from each dimension and alternates them (`x₀, y₀, x₁, y₁, ...`). The resulting Z-value preserves spatial locality: points close in geographic space yield numerically adjacent sort keys. Query engines generate file-level min/max statistics on the clustered columns, enabling [Predicate Pushdown Optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) to bypass entire files when the query envelope falls outside the stored value ranges.
 
 ## CRS Selection & Spatial Parameterization
 
@@ -96,7 +96,7 @@ Z-ordering is not a partitioning replacement. Without a coarse partitioning stra
   - Delta: `delta.deletedFileRetentionDuration = 'interval 30 days'`
   - Iceberg: `'history.expire.max-snapshot-age-ms' = '2592000000'` (30 days)
 
-When partition bounds align with query patterns, Z-ordering operates efficiently within narrow file groups. For deeper partitioning topology guidance, review [Spatial Partitioning Schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/).
+When partition bounds align with query patterns, Z-ordering operates efficiently within narrow file groups. For deeper partitioning topology guidance, review [Spatial Partitioning Schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/).
 
 ## CI/CD Automation & Operational Guardrails
 
@@ -142,7 +142,7 @@ jobs:
 | High write amplification during compaction | Z-ordering applied to high-cardinality non-spatial columns | Restrict `ZORDER BY` to 2–3 spatial columns. Remove categorical IDs or timestamps from the sort order. |
 | Query returns incorrect spatial results | CRS mismatch between stored data and query filter | Verify query envelope uses the same projection as the Z-ordered column. Transform query bounds to the table's CRS before execution. |
 | Compaction OOMs | Partition scope too large or target file size misconfigured | Reduce partition granularity (e.g., switch from monthly to daily). Lower `write.target-file-size-bytes` to `67108864` (64MB). |
-| Join performance degradation | Z-ordering not aligned with join keys | For spatial joins, align Z-order columns with the driving table's geometry bounding box columns. See [Optimizing spatial joins with Iceberg Z-ordering](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) for join-specific clustering strategies. |
+| Join performance degradation | Z-ordering not aligned with join keys | For spatial joins, align Z-order columns with the driving table's geometry bounding box columns. See [Optimizing spatial joins with Iceberg Z-ordering](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) for join-specific clustering strategies. |
 
 **Validation Checklist Before Production Rollout:**
 - [ ] Confirm CRS consistency across ingestion, Z-ordering, and query layers.

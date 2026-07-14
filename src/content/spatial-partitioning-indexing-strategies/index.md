@@ -35,7 +35,7 @@ Unlike traditional RDBMS spatial indexes that maintain in-memory or on-disk tree
 
 ## Partitioning Boundary Design
 
-Partitioning in a spatial lakehouse dictates the physical directory hierarchy and directly controls I/O scope. Traditional temporal or business-key partitions rarely align with geographic predicates. When evaluating [Spatial Partitioning Schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/), architects must balance partition granularity against the small-files problem. Over-partitioning by high-resolution grid cells (e.g., H3 resolution 10 or S2 level 15) creates millions of directories, overwhelming catalog APIs and inflating manifest overhead. Under-partitioning forces full-table scans, negating spatial filtering benefits.
+Partitioning in a spatial lakehouse dictates the physical directory hierarchy and directly controls I/O scope. Traditional temporal or business-key partitions rarely align with geographic predicates. When evaluating [Spatial Partitioning Schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/), architects must balance partition granularity against the small-files problem. Over-partitioning by high-resolution grid cells (e.g., H3 resolution 10 or S2 level 15) creates millions of directories, overwhelming catalog APIs and inflating manifest overhead. Under-partitioning forces full-table scans, negating spatial filtering benefits.
 
 Production configurations typically adopt hierarchical spatial partitioning combined with a secondary temporal key. This limits directory fan-out while preserving spatial locality. Always cap active partitions per table to fewer than 10,000 to avoid catalog latency spikes and ensure efficient manifest generation.
 
@@ -58,7 +58,7 @@ LOCATION 's3://lakehouse-prod/traffic/';
 
 ## Multi-Dimensional File Clustering
 
-Partitioning handles coarse locality, but arbitrary spatial predicates (`ST_Intersects`, `ST_DWithin`) require fine-grained file clustering. Spatial coordinates are inherently two-dimensional, while object storage and table formats operate on one-dimensional byte streams. Mapping techniques like Z-ordering or Hilbert curves preserve spatial locality during writes. Implementing [Z-Ordering for Geospatial Queries](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) ensures that geometries with similar bounding boxes are co-located in the same Parquet files.
+Partitioning handles coarse locality, but arbitrary spatial predicates (`ST_Intersects`, `ST_DWithin`) require fine-grained file clustering. Spatial coordinates are inherently two-dimensional, while object storage and table formats operate on one-dimensional byte streams. Mapping techniques like Z-ordering or Hilbert curves preserve spatial locality during writes. Implementing [Z-Ordering for Geospatial Queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) ensures that geometries with similar bounding boxes are co-located in the same Parquet files.
 
 **Delta Lake Z-Order Optimization:**
 ```sql
@@ -71,7 +71,7 @@ ZORDER BY (min_lon, min_lat, max_lon, max_lat);
 
 ## Metadata-Driven Predicate Pushdown
 
-Lakehouse performance hinges on metadata pruning. Engines like Spark, Trino, and DuckDB extract min/max bounding boxes from file footers. When a query executes, the planner evaluates these statistics before deserializing geometries. Properly configured [Predicate Pushdown Optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) eliminates unnecessary I/O by skipping files whose bounding boxes do not intersect the query window.
+Lakehouse performance hinges on metadata pruning. Engines like Spark, Trino, and DuckDB extract min/max bounding boxes from file footers. When a query executes, the planner evaluates these statistics before deserializing geometries. Properly configured [Predicate Pushdown Optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) eliminates unnecessary I/O by skipping files whose bounding boxes do not intersect the query window.
 
 **Implementation Requirements:**
 - Ensure spatial columns are written with a consistent CRS (e.g., EPSG:4326) to prevent coordinate transformation overhead during filtering.
@@ -82,7 +82,7 @@ Lakehouse performance hinges on metadata pruning. Engines like Spark, Trino, and
 
 ## Raster & Vector Hybrid Layouts
 
-Spatial workloads rarely consist solely of vector geometries. Raster data (satellite imagery, DEMs, LiDAR) requires chunked storage aligned with spatial boundaries. [Bucket Mapping for Raster Data](/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/) enables efficient tile retrieval by mapping geographic extents to deterministic object storage keys. Production pipelines typically split large GeoTIFFs into 256×256 or 512×512 pixel tiles, store them with spatial metadata, and register them in the lakehouse catalog.
+Spatial workloads rarely consist solely of vector geometries. Raster data (satellite imagery, DEMs, LiDAR) requires chunked storage aligned with spatial boundaries. [Bucket Mapping for Raster Data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/) enables efficient tile retrieval by mapping geographic extents to deterministic object storage keys. Production pipelines typically split large GeoTIFFs into 256×256 or 512×512 pixel tiles, store them with spatial metadata, and register them in the lakehouse catalog.
 
 **PySpark Raster Chunking Pattern:**
 ```python

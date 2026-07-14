@@ -4,9 +4,9 @@ In production spatial lakehouse deployments, deterministic access control is a n
 
 ## Metadata-First Access Control Architecture
 
-To enforce this execution sequence, access control must bind directly to the table format's metadata layer. As established in [Spatial Lakehouse Fundamentals & Architecture](/spatial-lakehouse-fundamentals-architecture/), geometry columns stored as raw WKB or WKT require full deserialization by the query planner to extract spatial bounds, which forces a file scan before any security filter can apply. This architectural gap enables spatial index bypass.
+To enforce this execution sequence, access control must bind directly to the table format's metadata layer. As established in [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/), geometry columns stored as raw WKB or WKT require full deserialization by the query planner to extract spatial bounds, which forces a file scan before any security filter can apply. This architectural gap enables spatial index bypass.
 
-Modern table formats mitigate this by exposing structured metadata and manifest-level partition pruning. The access control pipeline must treat tenant identifiers as first-class partition or metadata columns, enabling the storage layer to prune files before spatial compute begins. Refer to [Security Boundaries for GIS Data](/spatial-lakehouse-fundamentals-architecture/security-boundaries-for-gis-data/) for the threat model governing this execution order and the compliance implications of premature spatial evaluation.
+Modern table formats mitigate this by exposing structured metadata and manifest-level partition pruning. The access control pipeline must treat tenant identifiers as first-class partition or metadata columns, enabling the storage layer to prune files before spatial compute begins. Refer to [Security Boundaries for GIS Data](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/security-boundaries-for-gis-data/) for the threat model governing this execution order and the compliance implications of premature spatial evaluation.
 
 ## Production Configuration Blueprint
 

@@ -37,28 +37,28 @@ module.exports = {
         return "";
       }
     },
-    pillarSlug: (data) => {
+    sectionSlug: (data) => {
       const url = (data.page && data.page.url) || "";
       const parts = url.replace(/^\/+|\/+$/g, "").split("/");
       return parts[0] || "";
     },
-    isPillarHub: (data) => {
+    isSectionLanding: (data) => {
       const url = (data.page && data.page.url) || "";
       const parts = url.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
       return parts.length === 1;
     },
-    pillar: (data) => {
+    section: (data) => {
       const url = (data.page && data.page.url) || "";
       const slug = url.replace(/^\/+|\/+$/g, "").split("/")[0] || "";
       return slug;
     },
-    seoTitle: (data) => {
-      // Respect explicit seoTitle set in frontmatter via _seoTitle key
-      if (data._seoTitle) return data._seoTitle;
+    pageTitle: (data) => {
+      // Respect explicit pageTitle set in frontmatter via _pageTitle key
+      if (data._pageTitle) return data._pageTitle;
       const url = (data.page && data.page.url) || "";
       const parts = url.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
-      if (parts.length === 1 && data.site && Array.isArray(data.site.pillars)) {
-        const match = data.site.pillars.find((p) => p.slug === parts[0]);
+      if (parts.length === 1 && data.site && Array.isArray(data.site.sections)) {
+        const match = data.site.sections.find((p) => p.slug === parts[0]);
         if (match) {
           // Strip &amp; and other HTML entities for proper length
           const title = match.title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");

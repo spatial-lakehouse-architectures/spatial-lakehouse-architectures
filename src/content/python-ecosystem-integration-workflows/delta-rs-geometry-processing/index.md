@@ -1,6 +1,6 @@
 # Delta-rs Geometry Processing
 
-Spatial data lakehouse architectures increasingly rely on Rust-backed table formats to handle high-throughput geometry workloads at cloud scale. Within the broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/), `delta-rs` has emerged as a critical runtime for bridging GIS backends with object storage. Unlike legacy shapefile or GeoPackage pipelines, `delta-rs` operates directly on Parquet with ACID transactional guarantees, but geometry columns introduce unique serialization, partitioning, and compaction challenges. This guide targets platform engineers and GIS backend developers implementing `delta-rs` in production, focusing on operational configuration, debugging patterns, and format-specific trade-offs.
+Spatial data lakehouse architectures increasingly rely on Rust-backed table formats to handle high-throughput geometry workloads at cloud scale. Within the broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/), `delta-rs` has emerged as a critical runtime for bridging GIS backends with object storage. Unlike legacy shapefile or GeoPackage pipelines, `delta-rs` operates directly on Parquet with ACID transactional guarantees, but geometry columns introduce unique serialization, partitioning, and compaction challenges. This guide targets platform engineers and GIS backend developers implementing `delta-rs` in production, focusing on operational configuration, debugging patterns, and format-specific trade-offs.
 
 ## Partitioning Strategies for Spatial Data
 
@@ -63,11 +63,11 @@ write_deltalake(
 )
 ```
 
-Debugging partition skew involves inspecting `_delta_log` JSON commit files and monitoring file size distribution via `DeltaTable.get_add_actions()`. If you observe >10x variance in partition file counts, re-evaluate grid resolution or implement dynamic partition pruning. In CI/CD pipelines, enforce partition validation by asserting that spatial keys align with expected geographic extents before committing writes. For deeper schema alignment patterns, review [DataFrame Mapping Strategies](/python-ecosystem-integration-workflows/dataframe-mapping-strategies/) when designing ingestion contracts.
+Debugging partition skew involves inspecting `_delta_log` JSON commit files and monitoring file size distribution via `DeltaTable.get_add_actions()`. If you observe >10x variance in partition file counts, re-evaluate grid resolution or implement dynamic partition pruning. In CI/CD pipelines, enforce partition validation by asserting that spatial keys align with expected geographic extents before committing writes. For deeper schema alignment patterns, review [DataFrame Mapping Strategies](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/dataframe-mapping-strategies/) when designing ingestion contracts.
 
 ## Spatial Indexing & Data Skipping Trade-offs
 
-`delta-rs` relies on Parquet column statistics and data skipping rather than explicit spatial indexes like PostGIS or GeoMesa. This creates a fundamental architectural divergence from [PyIceberg Spatial Workflows](/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/), where Iceberg's hidden partitioning and manifest-level metadata can be tuned for spatial predicate pushdown without altering table schemas. In `delta-rs`, you must explicitly materialize spatial bounds as separate columns to enable data skipping.
+`delta-rs` relies on Parquet column statistics and data skipping rather than explicit spatial indexes like PostGIS or GeoMesa. This creates a fundamental architectural divergence from [PyIceberg Spatial Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/), where Iceberg's hidden partitioning and manifest-level metadata can be tuned for spatial predicate pushdown without altering table schemas. In `delta-rs`, you must explicitly materialize spatial bounds as separate columns to enable data skipping.
 
 Configure table properties to force the query engine to index your geometry-derived bounds during compaction:
 
@@ -113,7 +113,7 @@ Set explicit retention parameters in table properties to prevent transaction log
 - `delta.deletedFileRetentionDuration = interval 7 days`
 - `delta.enableExpiredLogCleanup = true`
 
-When writing spatial Parquet files, ensure the Rust writer is configured to handle large binary columns efficiently. Refer to [Using delta-rs to write spatial parquet files](/python-ecosystem-integration-workflows/delta-rs-geometry-processing/using-delta-rs-to-write-spatial-parquet-files/) for serialization benchmarks and memory tuning guidance.
+When writing spatial Parquet files, ensure the Rust writer is configured to handle large binary columns efficiently. Refer to [Using delta-rs to write spatial parquet files](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/delta-rs-geometry-processing/using-delta-rs-to-write-spatial-parquet-files/) for serialization benchmarks and memory tuning guidance.
 
 ## CI/CD Validation & Schema Enforcement
 

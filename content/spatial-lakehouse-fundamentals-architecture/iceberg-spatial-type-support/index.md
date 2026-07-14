@@ -1,12 +1,12 @@
 # Iceberg Spatial Type Support: Production Architecture & Operational Guide
 
-Implementing spatial workloads on open table formats requires deliberate alignment between storage semantics, query engines, and metadata management. Within the broader [Spatial Lakehouse Fundamentals & Architecture](/spatial-lakehouse-fundamentals-architecture/) framework, Iceberg's spatial type support operates at the intersection of columnar storage optimization and geospatial predicate evaluation. Unlike proprietary GIS databases that embed spatial indexes directly into storage layers, Iceberg delegates filtering to manifest-level statistics, deterministic partition transforms, and engine-level UDFs. This architectural shift eliminates vendor lock-in but demands explicit configuration at the table, partition, and pipeline layers to prevent full-table scans on geometry columns.
+Implementing spatial workloads on open table formats requires deliberate alignment between storage semantics, query engines, and metadata management. Within the broader [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/) framework, Iceberg's spatial type support operates at the intersection of columnar storage optimization and geospatial predicate evaluation. Unlike proprietary GIS databases that embed spatial indexes directly into storage layers, Iceberg delegates filtering to manifest-level statistics, deterministic partition transforms, and engine-level UDFs. This architectural shift eliminates vendor lock-in but demands explicit configuration at the table, partition, and pipeline layers to prevent full-table scans on geometry columns.
 
 ## Schema Design & CRS Enforcement
 
 Iceberg's V3 specification introduces native `geometry` and `geography` types, but engine support is still uneven, so most production deployments continue to treat spatial columns as structured binary or string representations. Geometry payloads are stored as `BINARY` (WKB) columns; query engines such as Spark with Apache Sedona or Trino with its geospatial plugin interpret these payloads at runtime. To guarantee cross-engine interoperability, enforce strict Coordinate Reference System (CRS) validation at ingestion. Platform architects should standardize on EPSG:4326 (WGS84) for global datasets, storing the CRS identifier alongside the geometry to prevent silent coordinate drift during downstream joins.
 
-Schema evolution is handled through Iceberg's explicit metadata tracking. When adding or altering spatial columns, leverage the format's backward-compatible type promotion rules to avoid breaking consumers. For detailed versioning strategies, consult the [Open Table Format Versioning](/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/) guidelines to align snapshot progression with spatial schema migrations.
+Schema evolution is handled through Iceberg's explicit metadata tracking. When adding or altering spatial columns, leverage the format's backward-compatible type promotion rules to avoid breaking consumers. For detailed versioning strategies, consult the [Open Table Format Versioning](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/) guidelines to align snapshot progression with spatial schema migrations.
 
 **PySpark: Schema Definition with CRS Validation**
 ```python
@@ -50,7 +50,7 @@ TBLPROPERTIES (
 );
 ```
 
-Ingestion pipelines must guarantee that `geohash` is computed deterministically (e.g., using a spatial UDF that calls `ST_GeoHash(boundary, precision => 6)`). If upstream writes are unsorted, schedule `rewrite_data_files` with a spatial sort order to maintain clustering efficiency. Unlike [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/), which relies on post-write `ZORDER BY` optimization, Iceberg's `write.sort-order` enforces clustering at write time, reducing compaction overhead but requiring strict pipeline discipline.
+Ingestion pipelines must guarantee that `geohash` is computed deterministically (e.g., using a spatial UDF that calls `ST_GeoHash(boundary, precision => 6)`). If upstream writes are unsorted, schedule `rewrite_data_files` with a spatial sort order to maintain clustering efficiency. Unlike [Delta Lake Geometry Handling](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/), which relies on post-write `ZORDER BY` optimization, Iceberg's `write.sort-order` enforces clustering at write time, reducing compaction overhead but requiring strict pipeline discipline.
 
 ## Predicate Pushdown & Manifest Statistics
 
@@ -99,7 +99,7 @@ jobs:
         run: pytest tests/test_spatial_integrity.py -v
 ```
 
-When ingesting unstructured spatial payloads, refer to [How to store GeoJSON in Apache Iceberg tables](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/how-to-store-geojson-in-apache-iceberg-tables/) for serialization patterns that preserve topology without inflating Parquet row groups.
+When ingesting unstructured spatial payloads, refer to [How to store GeoJSON in Apache Iceberg tables](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/how-to-store-geojson-in-apache-iceberg-tables/) for serialization patterns that preserve topology without inflating Parquet row groups.
 
 ## Troubleshooting Production Anomalies
 

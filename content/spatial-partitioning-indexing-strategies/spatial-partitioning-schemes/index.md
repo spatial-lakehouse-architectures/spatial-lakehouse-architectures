@@ -1,6 +1,6 @@
 # Spatial Partitioning Schemes
 
-Geospatial workloads in modern data lakehouses demand partitioning strategies that respect topological adjacency rather than lexical ordering. Traditional range or hash partitioning on coordinate columns produces severe data skew, triggers the small-files problem, and degrades join performance. Within the broader [Spatial Partitioning & Indexing Strategies](/spatial-partitioning-indexing-strategies/) framework, spatial partitioning schemes translate geographic primitives into deterministic storage layouts, enabling directory pruning, metadata efficiency, and predictable query latency. This guide details production-grade configuration, format-specific trade-offs, and operational maintenance for deploying spatial partitioning across Delta Lake and Apache Iceberg.
+Geospatial workloads in modern data lakehouses demand partitioning strategies that respect topological adjacency rather than lexical ordering. Traditional range or hash partitioning on coordinate columns produces severe data skew, triggers the small-files problem, and degrades join performance. Within the broader [Spatial Partitioning & Indexing Strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/) framework, spatial partitioning schemes translate geographic primitives into deterministic storage layouts, enabling directory pruning, metadata efficiency, and predictable query latency. This guide details production-grade configuration, format-specific trade-offs, and operational maintenance for deploying spatial partitioning across Delta Lake and Apache Iceberg.
 
 ## Architectural Foundations
 
@@ -81,7 +81,7 @@ df_spatial.write \
     .save("s3://lakehouse/geospatial/events")
 ```
 
-For a complete breakdown of directory pruning behavior and transaction log optimization, review [Implementing H3 hexagon partitioning in Delta Lake](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
+For a complete breakdown of directory pruning behavior and transaction log optimization, review [Implementing H3 hexagon partitioning in Delta Lake](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
 
 ### Spark SQL: Apache Iceberg Partition Transforms
 
@@ -116,7 +116,7 @@ WHERE ts >= '2024-01-01';
 
 ## Clustering & Query Optimization
 
-Partitioning alone cannot resolve intra-file spatial locality. Pair coarse partitions with in-file clustering to minimize row-group scans. Applying [Z-Ordering for Geospatial Queries](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) interleaves longitude and latitude bits, ensuring adjacent coordinates share Parquet row groups. This requires scheduled `OPTIMIZE` or `rewrite_data_files` jobs to maintain clustering efficiency as data ages.
+Partitioning alone cannot resolve intra-file spatial locality. Pair coarse partitions with in-file clustering to minimize row-group scans. Applying [Z-Ordering for Geospatial Queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) interleaves longitude and latitude bits, ensuring adjacent coordinates share Parquet row groups. This requires scheduled `OPTIMIZE` or `rewrite_data_files` jobs to maintain clustering efficiency as data ages.
 
 For Iceberg, enforce sort order during writes:
 ```sql
@@ -137,7 +137,7 @@ Monitor partition cardinality weekly. If `h3_res7` cardinality exceeds 50,000 un
 3. Running daily compaction to merge small files (`delta.autoOptimize.optimizeWrite = true`)
 
 ### Predicate Pushdown Debugging
-Spatial predicates fail to prune when column statistics lack envelope bounds. Ensure your query engine leverages [Predicate Pushdown Optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) by exposing min/max coordinates in Parquet metadata. In Spark, validate pushdown with:
+Spatial predicates fail to prune when column statistics lack envelope bounds. Ensure your query engine leverages [Predicate Pushdown Optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) by exposing min/max coordinates in Parquet metadata. In Spark, validate pushdown with:
 
 ```sql
 EXPLAIN EXTENDED

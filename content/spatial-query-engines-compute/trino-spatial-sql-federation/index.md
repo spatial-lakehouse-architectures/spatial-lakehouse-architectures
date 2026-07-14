@@ -1,6 +1,6 @@
 # Trino Spatial SQL and Cross-Catalog Federation
 
-Trino is a massively parallel processing (MPP) SQL engine that shines when a spatial query must span data that lives in more than one system at once. A single `SELECT` can intersect points stored in an Apache Iceberg catalog against administrative polygons kept in PostgreSQL and legacy parcel tables registered in a Hive metastore, all without copying anything into a staging area. This topic area covers the Trino geospatial function surface (`ST_Intersects`, `ST_Contains`, `ST_Distance`), the `Geometry` and Bing-tile types, spatial-partitioning-aware distributed joins, and the federation mechanics that let one coordinator plan a query across three connectors. It sits inside the broader [Spatial Query Engines & Compute Optimization](/spatial-query-engines-compute/) section, alongside single-node engines such as [DuckDB geospatial analytics](/spatial-query-engines-compute/duckdb-geospatial-analytics/) and cluster-scale frameworks like [Apache Sedona](/spatial-query-engines-compute/sedona-distributed-spatial-compute/).
+Trino is a massively parallel processing (MPP) SQL engine that shines when a spatial query must span data that lives in more than one system at once. A single `SELECT` can intersect points stored in an Apache Iceberg catalog against administrative polygons kept in PostgreSQL and legacy parcel tables registered in a Hive metastore, all without copying anything into a staging area. This topic area covers the Trino geospatial function surface (`ST_Intersects`, `ST_Contains`, `ST_Distance`), the `Geometry` and Bing-tile types, spatial-partitioning-aware distributed joins, and the federation mechanics that let one coordinator plan a query across three connectors. It sits inside the broader [Spatial Query Engines & Compute Optimization](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/) section, alongside single-node engines such as [DuckDB geospatial analytics](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/) and cluster-scale frameworks like [Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/).
 
 ## When to use this
 
@@ -80,7 +80,7 @@ Verify the engine sees the geospatial catalog with `SHOW FUNCTIONS LIKE 'ST\_%';
 
 ### 1. Materialize geometry columns as the Geometry type
 
-Iceberg stores geometry as WKB in a `varbinary` column (see [Iceberg spatial type support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) for the encoding contract). Trino spatial functions do not operate on raw `varbinary`; you must reconstruct a `Geometry` with `ST_GeomFromBinary`. Wrap this in a view so downstream queries never touch the raw bytes.
+Iceberg stores geometry as WKB in a `varbinary` column (see [Iceberg spatial type support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) for the encoding contract). Trino spatial functions do not operate on raw `varbinary`; you must reconstruct a `Geometry` with `ST_GeomFromBinary`. Wrap this in a view so downstream queries never touch the raw bytes.
 
 ```sql
 -- Trino DDL: a view that exposes decoded geometry over Iceberg WKB
@@ -111,7 +111,7 @@ FROM postgresql.reference.zones;
 
 ### 3. Run the cross-catalog spatial join
 
-The join predicate combines the cheap equi-join on the tile (which drives partitioning and pruning) with the exact `ST_Intersects` test. The tile equality lets Trino colocate rows; the geometry predicate removes false positives from tile-boundary overlap. This end-to-end recipe is expanded in [Spatial joins across catalogs with Trino](/spatial-query-engines-compute/trino-spatial-sql-federation/spatial-joins-across-catalogs-with-trino/).
+The join predicate combines the cheap equi-join on the tile (which drives partitioning and pruning) with the exact `ST_Intersects` test. The tile equality lets Trino colocate rows; the geometry predicate removes false positives from tile-boundary overlap. This end-to-end recipe is expanded in [Spatial joins across catalogs with Trino](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/spatial-joins-across-catalogs-with-trino/).
 
 ```sql
 SET SESSION join_distribution_type = 'PARTITIONED';
@@ -124,7 +124,7 @@ JOIN postgresql.reference.zone_tiles AS z
 WHERE p.event_ts >= TIMESTAMP '2026-07-01 00:00:00';
 ```
 
-Because `grid_h3` and `tile` are both partition-aligned, the planner distributes each side by the same key and avoids broadcasting the (potentially large) reference set. The `event_ts` filter is pushed into Iceberg manifest planning, so only relevant data files are scanned — the same mechanism described under [predicate pushdown optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
+Because `grid_h3` and `tile` are both partition-aligned, the planner distributes each side by the same key and avoids broadcasting the (potentially large) reference set. The `event_ts` filter is pushed into Iceberg manifest planning, so only relevant data files are scanned — the same mechanism described under [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
 
 ## Verification and testing
 
@@ -149,7 +149,7 @@ The dominant cost in a federated spatial join is data movement, so the goal is t
 - `node-scheduler.max-splits-per-node`: raise from the default 256 toward 512 when scanning wide Iceberg tables so workers stay saturated.
 - `query.max-memory-per-node`: geometry objects are heap-heavy; budget at least 4–8 GB per worker for joins over 100M+ geometries and enable spill (`spill-enabled=true`) as a safety valve.
 
-A well-partitioned join over an Iceberg fact table that is [Z-ordered for spatial locality](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) typically scans 5–15% of files and completes in single-digit seconds at the 100 GB scale; the same query without partition alignment degrades to a full-table broadcast and can be 20–50x slower.
+A well-partitioned join over an Iceberg fact table that is [Z-ordered for spatial locality](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) typically scans 5–15% of files and completes in single-digit seconds at the 100 GB scale; the same query without partition alignment degrades to a full-table broadcast and can be 20–50x slower.
 
 ## Common errors and fixes
 
@@ -161,4 +161,4 @@ A well-partitioned join over an Iceberg fact table that is [Z-ordered for spatia
 | PostGIS join returns zero rows | PostGIS `geometry` came back as WKB but SRID/axis order differs | Standardize on EPSG:4326 lon/lat; re-encode reference with `ST_AsBinary` and decode with `ST_GeomFromBinary` |
 | `Query exceeded per-node memory limit` | Millions of large geometries held in the join hash | Enable `spill-enabled`, raise `query.max-memory-per-node`, coarsen the grid so partitions are smaller |
 
-For the authoritative function reference and connector behavior, consult the [Trino geospatial functions documentation](https://trino.io/docs/current/functions/geospatial.html) and the [Trino Iceberg connector documentation](https://trino.io/docs/current/connector/iceberg.html). When you are ready to benchmark this engine against DuckDB and Sedona on identical GeoParquet inputs, see [benchmarking spatial query engines on GeoParquet](/spatial-query-engines-compute/engine-benchmarking-selection/benchmarking-spatial-query-engines-on-geoparquet/).
+For the authoritative function reference and connector behavior, consult the [Trino geospatial functions documentation](https://trino.io/docs/current/functions/geospatial.html) and the [Trino Iceberg connector documentation](https://trino.io/docs/current/connector/iceberg.html). When you are ready to benchmark this engine against DuckDB and Sedona on identical GeoParquet inputs, see [benchmarking spatial query engines on GeoParquet](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/benchmarking-spatial-query-engines-on-geoparquet/).

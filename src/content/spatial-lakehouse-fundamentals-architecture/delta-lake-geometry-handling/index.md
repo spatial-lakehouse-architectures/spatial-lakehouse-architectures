@@ -1,6 +1,6 @@
 # Delta Lake Geometry Handling: Partitioning, Indexing, and Operational Workflows
 
-Operationalizing spatial data in Delta Lake requires deliberate engineering around its type system, data skipping mechanics, and transactional overhead. While [Spatial Lakehouse Fundamentals & Architecture](/spatial-lakehouse-fundamentals-architecture/) establishes the conceptual boundaries between compute engines, storage layers, and coordinate reference systems, production deployments must compensate for Delta's lack of native spatial primitives. Instead of built-in geometry types, Delta relies on optimized binary serialization, strategic partitioning, and explicit maintenance routines to deliver predictable query performance at scale. This guide provides implementation-ready configurations, debugging workflows, and format-specific trade-offs for engineering-grade Delta geometry tables.
+Operationalizing spatial data in Delta Lake requires deliberate engineering around its type system, data skipping mechanics, and transactional overhead. While [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/) establishes the conceptual boundaries between compute engines, storage layers, and coordinate reference systems, production deployments must compensate for Delta's lack of native spatial primitives. Instead of built-in geometry types, Delta relies on optimized binary serialization, strategic partitioning, and explicit maintenance routines to deliver predictable query performance at scale. This guide provides implementation-ready configurations, debugging workflows, and format-specific trade-offs for engineering-grade Delta geometry tables.
 
 ## Geometry Serialization & Schema Enforcement
 
@@ -27,7 +27,7 @@ TBLPROPERTIES (
 );
 ```
 
-Unlike Apache Iceberg, which has moved toward native spatial type extensions and predicate-aware spatial indexing, Delta relies on the underlying Parquet engine and Spark SQL UDFs for geometry operations. If your architecture requires strict spatial type guarantees or out-of-the-box `ST_*` function optimization, evaluate [Iceberg Spatial Type Support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) before committing to Delta. For Delta deployments, wrap all geometry reads in a deterministic UDF that validates WKB headers and rejects malformed payloads at ingestion time:
+Unlike Apache Iceberg, which has moved toward native spatial type extensions and predicate-aware spatial indexing, Delta relies on the underlying Parquet engine and Spark SQL UDFs for geometry operations. If your architecture requires strict spatial type guarantees or out-of-the-box `ST_*` function optimization, evaluate [Iceberg Spatial Type Support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) before committing to Delta. For Delta deployments, wrap all geometry reads in a deterministic UDF that validates WKB headers and rejects malformed payloads at ingestion time:
 
 ```python
 from pyspark.sql.functions import udf
@@ -97,7 +97,7 @@ JOIN spatial_zones b
 WHERE ST_Intersects(a.geom, b.geom) = true;
 ```
 
-The initial bounding box filter leverages Delta's min/max statistics to skip irrelevant files before the compute-heavy `ST_Intersects` UDF executes. For architectures comparing Delta against traditional PostGIS or GeoPackage deployments, review [Delta Lake spatial index vs native GIS formats](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/delta-lake-spatial-index-vs-native-gis-formats/) to understand where Delta's file-level skipping outperforms row-level B-tree indexes at petabyte scale.
+The initial bounding box filter leverages Delta's min/max statistics to skip irrelevant files before the compute-heavy `ST_Intersects` UDF executes. For architectures comparing Delta against traditional PostGIS or GeoPackage deployments, review [Delta Lake spatial index vs native GIS formats](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/delta-lake-spatial-index-vs-native-gis-formats/) to understand where Delta's file-level skipping outperforms row-level B-tree indexes at petabyte scale.
 
 ## Production Maintenance & Transaction Management
 
@@ -145,7 +145,7 @@ jobs:
           WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
 ```
 
-Transaction log pruning must align with your compliance and time-travel requirements. For detailed guidance on managing checkpoint intervals and log retention across open table formats, consult [Open Table Format Versioning](/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/).
+Transaction log pruning must align with your compliance and time-travel requirements. For detailed guidance on managing checkpoint intervals and log retention across open table formats, consult [Open Table Format Versioning](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/).
 
 ## Troubleshooting & Debugging Workflows
 

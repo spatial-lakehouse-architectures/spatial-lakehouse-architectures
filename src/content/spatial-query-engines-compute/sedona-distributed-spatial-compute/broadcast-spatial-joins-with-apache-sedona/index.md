@@ -4,7 +4,7 @@ This guide gives you a complete PySpark and Apache Sedona recipe that performs a
 
 ## Context and prerequisites
 
-A broadcast spatial join is the right pattern when one side of the join is small (a few thousand administrative or reference polygons, typically under ~100 MB) and the other is enormous. Instead of shuffling both sides across the network by a spatial partitioner, Sedona ships the small side to every executor and probes it with a local index — eliminating the large-side shuffle entirely. This recipe is the concrete companion to the [distributed spatial compute with Apache Sedona](/spatial-query-engines-compute/sedona-distributed-spatial-compute/) topic area within the [Spatial Query Engines & Compute Optimization](/spatial-query-engines-compute/) section. You need Spark 3.5, `apache-sedona` 1.6.x matched to that Spark version, and a reference layer that genuinely fits in executor memory; if both sides are large, use the KDB-tree partitioned join from the parent topic instead.
+A broadcast spatial join is the right pattern when one side of the join is small (a few thousand administrative or reference polygons, typically under ~100 MB) and the other is enormous. Instead of shuffling both sides across the network by a spatial partitioner, Sedona ships the small side to every executor and probes it with a local index — eliminating the large-side shuffle entirely. This recipe is the concrete companion to the [distributed spatial compute with Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/) topic area within the [Spatial Query Engines & Compute Optimization](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/) section. You need Spark 3.5, `apache-sedona` 1.6.x matched to that Spark version, and a reference layer that genuinely fits in executor memory; if both sides are large, use the KDB-tree partitioned join from the parent topic instead.
 
 ## Complete working solution
 
@@ -71,13 +71,13 @@ print("joined rows:", joined.count())
 
 1. **Register Sedona on the session (block 1).** The Kryo serializer and `SedonaKryoRegistrator` are mandatory — without them, geometry cannot be serialized for a broadcast and you get a serialization error at the first shuffle or collect. `spark.sql.autoBroadcastJoinThreshold` raised to 100 MB lets the optimizer choose a broadcast automatically for the small side; the explicit `broadcast()` hint in step 4 forces it regardless.
 
-2. **Read the large side (block 2).** `ST_GeomFromWKB` reconstructs geometries from the Iceberg WKB column. The `event_ts` filter is pushed into Iceberg scan planning so the large side is already reduced before the join — the same [predicate pushdown](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) leverage described for the SQL engines.
+2. **Read the large side (block 2).** `ST_GeomFromWKB` reconstructs geometries from the Iceberg WKB column. The `event_ts` filter is pushed into Iceberg scan planning so the large side is already reduced before the join — the same [predicate pushdown](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) leverage described for the SQL engines.
 
 3. **Read the small reference side (block 3).** Sedona reads GeoParquet natively and decodes its geometry column, so no `ST_GeomFromWKB` call is needed here. Aliasing to `zone_geom` avoids a name clash in the join.
 
 4. **Force the broadcast (block 4).** Wrapping `zones` in `broadcast()` tells Spark to ship the entire small layer to every executor and build a local index of it there. Each large-side partition then probes that in-memory index with `ST_Intersects` — no shuffle of the billions of pings, which is the whole point. `ST_Intersects` is the load-bearing predicate; it returns true when the geometries share any point.
 
-5. **Write back as WKB (block 5).** Persisting to Iceberg keeps the table engine-neutral so [Trino](/spatial-query-engines-compute/trino-spatial-sql-federation/) and DuckDB can read it later.
+5. **Write back as WKB (block 5).** Persisting to Iceberg keeps the table engine-neutral so [Trino](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/) and DuckDB can read it later.
 
 ## Common errors and fixes
 
@@ -136,4 +136,4 @@ The `explain()` output should show the small side under a broadcast exchange fee
 </svg>
 </figure>
 
-To compare this against a shuffle-partitioned join, return to [distributed spatial compute with Apache Sedona](/spatial-query-engines-compute/sedona-distributed-spatial-compute/); for the SQL-engine equivalent see [spatial joins across catalogs with Trino](/spatial-query-engines-compute/trino-spatial-sql-federation/spatial-joins-across-catalogs-with-trino/), and to prepare the Iceberg source see [optimizing spatial joins with Iceberg Z-ordering](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/). Canonical semantics for the join and broadcast hints are in the [Apache Sedona SQL documentation](https://sedona.apache.org/latest/tutorial/sql/).
+To compare this against a shuffle-partitioned join, return to [distributed spatial compute with Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/); for the SQL-engine equivalent see [spatial joins across catalogs with Trino](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/spatial-joins-across-catalogs-with-trino/), and to prepare the Iceberg source see [optimizing spatial joins with Iceberg Z-ordering](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/). Canonical semantics for the join and broadcast hints are in the [Apache Sedona SQL documentation](https://sedona.apache.org/latest/tutorial/sql/).

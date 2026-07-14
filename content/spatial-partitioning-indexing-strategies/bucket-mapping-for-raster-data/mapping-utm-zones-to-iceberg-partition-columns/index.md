@@ -1,6 +1,6 @@
 # Mapping UTM Zones to Iceberg Partition Columns: Resolving Spatial Skew and Predicate Pushdown Failures
 
-In production spatial lakehouse architectures, partitioning by Universal Transverse Mercator (UTM) zones appears geographically intuitive but consistently triggers severe query degradation and metadata bloat. The core engineering failure mode stems from treating UTM zones as flat categorical keys rather than hierarchical spatial containers. When mapped directly to Apache Iceberg partition columns, this approach violates established [Spatial Partitioning & Indexing Strategies](/spatial-partitioning-indexing-strategies/) by creating extreme cardinality skew, cross-zone query fan-out, and manifest-level filter bypass. This document details a deterministic mapping workflow that aligns UTM boundaries with Iceberg's partition evolution model while preserving predicate pushdown efficiency and ingestion throughput.
+In production spatial lakehouse architectures, partitioning by Universal Transverse Mercator (UTM) zones appears geographically intuitive but consistently triggers severe query degradation and metadata bloat. The core engineering failure mode stems from treating UTM zones as flat categorical keys rather than hierarchical spatial containers. When mapped directly to Apache Iceberg partition columns, this approach violates established [Spatial Partitioning & Indexing Strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/) by creating extreme cardinality skew, cross-zone query fan-out, and manifest-level filter bypass. This document details a deterministic mapping workflow that aligns UTM boundaries with Iceberg's partition evolution model while preserving predicate pushdown efficiency and ingestion throughput.
 
 ## The Partition Cardinality Failure Mode
 
@@ -38,7 +38,7 @@ TBLPROPERTIES (
 
 **Note on bucket syntax:** Iceberg's `bucket(N, column)` transform takes the number of buckets as the first argument and the column name as the second. The `grid_1deg_x` / `grid_1deg_y` columns (integer degree cells) provide a ~111km grid that is coarser than raw easting/northing, preventing hot-partition explosions at fine resolutions.
 
-The `bucket()` transforms ensure uniform distribution across the metastore. For raster-heavy pipelines, this hierarchical structure directly complements [Bucket Mapping for Raster Data](/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/) by aligning tile boundaries with partition boundaries.
+The `bucket()` transforms ensure uniform distribution across the metastore. For raster-heavy pipelines, this hierarchical structure directly complements [Bucket Mapping for Raster Data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/) by aligning tile boundaries with partition boundaries.
 
 ## Coordinate Extraction & Write Configuration
 

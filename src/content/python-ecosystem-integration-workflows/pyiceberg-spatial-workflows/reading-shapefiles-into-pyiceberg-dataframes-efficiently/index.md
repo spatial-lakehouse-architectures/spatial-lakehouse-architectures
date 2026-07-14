@@ -6,7 +6,7 @@ The primary failure mode in spatial lakehouse ingestion pipelines is unbounded m
 
 Shapefile ingestion fails at two distinct boundaries: cursor exhaustion and schema inference latency. The `.shp` format stores geometries as variable-length binary records. Loading these into a Pandas-backed DataFrame forces contiguous memory allocation proportional to vertex count, not file size. When PyIceberg attempts to map these objects to its native `binary` type, it performs a full scan to infer nullability and precision. This double-materialization pattern is unsustainable for municipal-scale parcels, hydrological networks, or cadastral datasets exceeding 500MB.
 
-The resolution requires bypassing high-level geometry object instantiation entirely. Instead of materializing `shapely` objects, the pipeline must stream raw WKB bytes directly from the file cursor, apply explicit schema constraints, and append batches to the Iceberg table using transactional `append` operations. This approach aligns with established [PyIceberg Spatial Workflows](/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/) that prioritize binary column mapping over object-relational translation.
+The resolution requires bypassing high-level geometry object instantiation entirely. Instead of materializing `shapely` objects, the pipeline must stream raw WKB bytes directly from the file cursor, apply explicit schema constraints, and append batches to the Iceberg table using transactional `append` operations. This approach aligns with established [PyIceberg Spatial Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/) that prioritize binary column mapping over object-relational translation.
 
 ## Pipeline Architecture: Chunked WKB Streaming
 
@@ -125,7 +125,7 @@ Production deployments require explicit memory and I/O constraints:
 | `shapely.wkb.dumps(include_srid)` | `False` | Excludes SRID from WKB payload (store separately in a `srid INT` column if needed). |
 | `iceberg.catalog.io-impl` | `pyiceberg.io.pyarrow.PyArrowFileIO` | Ensures zero-copy Parquet writes and native Arrow buffer reuse. |
 
-These settings integrate seamlessly with broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/) that standardize lakehouse I/O across heterogeneous data sources.
+These settings integrate seamlessly with broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/) that standardize lakehouse I/O across heterogeneous data sources.
 
 ## Failure Resolution & Debugging
 

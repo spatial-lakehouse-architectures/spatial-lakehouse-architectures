@@ -1,6 +1,6 @@
 # DataFrame Mapping Strategies
 
-Mapping spatial DataFrames to open table formats requires deliberate schema alignment, coordinate reference system (CRS) normalization, and storage layout optimization. Within modern spatial data lakehouse architectures, the choice between Apache Iceberg and Delta Lake dictates how geometry types, bounding boxes, and spatial indexes are materialized on disk. Establishing a consistent mapping strategy begins with understanding how Python-based transformation pipelines interact with underlying storage engines. The broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/) establishes the hierarchy of tooling—from GeoPandas and Shapely to distributed compute frameworks—that must be orchestrated before data reaches the lakehouse layer.
+Mapping spatial DataFrames to open table formats requires deliberate schema alignment, coordinate reference system (CRS) normalization, and storage layout optimization. Within modern spatial data lakehouse architectures, the choice between Apache Iceberg and Delta Lake dictates how geometry types, bounding boxes, and spatial indexes are materialized on disk. Establishing a consistent mapping strategy begins with understanding how Python-based transformation pipelines interact with underlying storage engines. The broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/) establishes the hierarchy of tooling—from GeoPandas and Shapely to distributed compute frameworks—that must be orchestrated before data reaches the lakehouse layer.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DataFrame mapping pipeline: GeoDataFrame, CRS normalize, schema map, Arrow table, table format write">
@@ -65,7 +65,7 @@ def map_and_validate_spatial_df(gdf: gpd.GeoDataFrame, target_crs: str = "EPSG:4
 
 Spatial partitioning strategies directly impact query performance and compaction overhead. Range partitioning on raw latitude/longitude coordinates consistently leads to severe data skew in urban corridors or coastal boundaries. Instead, implement space-filling curve partitioning—Z-order or Hilbert curves—applied to projected coordinates. Iceberg handles this through hidden partitioning and sort-order metadata, allowing the query engine to prune files without exposing partition columns to downstream consumers. Delta Lake requires explicit partition columns or relies on Delta's built-in Z-ordering (`OPTIMIZE ... ZORDER BY`).
 
-For high-throughput spatial joins, precompute spatial indexes (R-tree or quadtree) as auxiliary tables or materialized views rather than embedding them directly in the base DataFrame. Reference implementations for schema evolution, partition spec updates, and predicate pushdown validation are detailed in [PyIceberg Spatial Workflows](/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/). Always verify that spatial bounding boxes align with partition boundaries to maximize file pruning.
+For high-throughput spatial joins, precompute spatial indexes (R-tree or quadtree) as auxiliary tables or materialized views rather than embedding them directly in the base DataFrame. Reference implementations for schema evolution, partition spec updates, and predicate pushdown validation are detailed in [PyIceberg Spatial Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/). Always verify that spatial bounding boxes align with partition boundaries to maximize file pruning.
 
 **Recommended Partition Parameters:**
 - **Spatial Key:** H3 resolution 7 string column bucketed via `bucket(128, h3_res7)` in Iceberg, or used directly as a partition column in Delta
@@ -131,7 +131,7 @@ jobs:
           "
 ```
 
-When implementing Delta Lake mappings, leverage Rust-backed processing for lower memory overhead during WKB serialization and partition computation. Production patterns for high-throughput geometry ingestion and partition-aware writes are documented in [Delta-rs Geometry Processing](/python-ecosystem-integration-workflows/delta-rs-geometry-processing/). Ensure your pipeline enforces `OPTIMIZE` and `VACUUM` schedules aligned with your retention policy to prevent metadata bloat and orphaned file accumulation.
+When implementing Delta Lake mappings, leverage Rust-backed processing for lower memory overhead during WKB serialization and partition computation. Production patterns for high-throughput geometry ingestion and partition-aware writes are documented in [Delta-rs Geometry Processing](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/delta-rs-geometry-processing/). Ensure your pipeline enforces `OPTIMIZE` and `VACUUM` schedules aligned with your retention policy to prevent metadata bloat and orphaned file accumulation.
 
 ## Operational Troubleshooting Paths
 

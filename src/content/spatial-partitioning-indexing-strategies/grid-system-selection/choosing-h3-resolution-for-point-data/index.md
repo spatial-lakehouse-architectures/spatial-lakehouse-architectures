@@ -4,7 +4,7 @@ This guide gives you a repeatable method — plus a runnable script that samples
 
 ## Context and prerequisites
 
-H3 resolution is the knob that decides partition cardinality: each finer resolution splits a cell into seven children, so moving one level multiplies your partition count by roughly seven and divides rows-per-cell by the same factor. Pick it wrong and you either get multi-gigabyte hot partitions or millions of tiny files. This page assumes you have already chosen H3 over S2 and geohash — that decision is covered in [selecting a discrete global grid for lakehouse partitioning](/spatial-partitioning-indexing-strategies/grid-system-selection/) and benchmarked in [H3 vs S2 vs geohash for lakehouse partitioning](/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/). You need Python 3.10+ and h3-py 4.x.
+H3 resolution is the knob that decides partition cardinality: each finer resolution splits a cell into seven children, so moving one level multiplies your partition count by roughly seven and divides rows-per-cell by the same factor. Pick it wrong and you either get multi-gigabyte hot partitions or millions of tiny files. This page assumes you have already chosen H3 over S2 and geohash — that decision is covered in [selecting a discrete global grid for lakehouse partitioning](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/) and benchmarked in [H3 vs S2 vs geohash for lakehouse partitioning](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/). You need Python 3.10+ and h3-py 4.x.
 
 ```bash
 python -m pip install "h3>=4.1,<5" "pandas>=2.0" "pyarrow>=14"
@@ -114,7 +114,7 @@ python h3_resolution_picker.py points.parquet \
 5. **`recommend`** returns the *finest* resolution satisfying both the capacity and radius constraints — finest, because smaller cells give better predicate selectivity, and you want the smallest cell you can afford before partitions get too big or ring queries fan out.
 6. If no resolution qualifies, the two constraints conflict: either your target rows-per-partition is too small for your query radius, or the data is too dense. Relax `--target-rpp` upward or `--max-k` and rerun.
 
-The default `--target-rpp` of 5 million rows aligns with a 128 MB–1 GB Parquet file at typical point-row widths. Once you have the resolution, materialize it as a partition column and wrap it in a `bucket` transform to tame hot cells, exactly as shown for [spatial partitioning schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) and [implementing H3 hexagon partitioning in Delta Lake](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
+The default `--target-rpp` of 5 million rows aligns with a 128 MB–1 GB Parquet file at typical point-row widths. Once you have the resolution, materialize it as a partition column and wrap it in a `bucket` transform to tame hot cells, exactly as shown for [spatial partitioning schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) and [implementing H3 hexagon partitioning in Delta Lake](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
 
 ## Common errors and fixes
 
@@ -143,7 +143,7 @@ FROM (
 );
 ```
 
-If `peak_rows_per_cell` runs far above `p95`, a few hot cells dominate — handle those with a `bucket` transform rather than by globally raising resolution, which would over-fragment every rural cell. Then confirm the key still prunes with [predicate pushdown optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/), and pair the partition with intra-file [Z-ordering for geospatial queries](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) on `lon, lat`.
+If `peak_rows_per_cell` runs far above `p95`, a few hot cells dominate — handle those with a `bucket` transform rather than by globally raising resolution, which would over-fragment every rural cell. Then confirm the key still prunes with [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/), and pair the partition with intra-file [Z-ordering for geospatial queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) on `lon, lat`.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two opposing constraints on H3 resolution converging on a recommended level">

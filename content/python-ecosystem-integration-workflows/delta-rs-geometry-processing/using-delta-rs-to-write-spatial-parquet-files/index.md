@@ -4,7 +4,7 @@ Unbounded memory consumption and transaction contention are the dominant failure
 
 ## Serialization Contract & Schema Enforcement
 
-Spatial columns stored as raw WKB bytes lack native Delta type hints. Relying on automatic inference defaults to generic `binary` without spatial metadata, which breaks downstream spatial indexing and forces full table scans. Pre-serialize geometries to Well-Known Binary (WKB) and attach [GeoParquet](https://github.com/opengeospatial/geoparquet)-compliant metadata before invoking the write engine. This aligns with the [Delta-rs Geometry Processing](/python-ecosystem-integration-workflows/delta-rs-geometry-processing/) validation pipeline, ensuring CRS consistency and bounding-box constraints are enforced prior to heap allocation. Stripping GeoJSON overhead reduces write-phase memory pressure by 40–60%.
+Spatial columns stored as raw WKB bytes lack native Delta type hints. Relying on automatic inference defaults to generic `binary` without spatial metadata, which breaks downstream spatial indexing and forces full table scans. Pre-serialize geometries to Well-Known Binary (WKB) and attach [GeoParquet](https://github.com/opengeospatial/geoparquet)-compliant metadata before invoking the write engine. This aligns with the [Delta-rs Geometry Processing](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/delta-rs-geometry-processing/) validation pipeline, ensuring CRS consistency and bounding-box constraints are enforced prior to heap allocation. Stripping GeoJSON overhead reduces write-phase memory pressure by 40–60%.
 
 Explicit schema enforcement prevents drift during schema evolution. Always construct a `pyarrow.Schema` object with `pa.binary()` for geometry columns and pass it directly to the writer. Omitting this step triggers naive binary inference, causing row group fragmentation and amplifying compaction overhead during `OPTIMIZE` cycles.
 
@@ -61,7 +61,7 @@ async def stream_write_spatial(table_uri: str, chunk_iterator, max_workers: int 
                 raise res
 ```
 
-This pattern integrates cleanly into broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/) by decoupling DataFrame materialization from the write boundary. Aligning DataFrame partitions with Delta's target file size prevents write amplification and ensures each Parquet file contains a single, contiguous spatial extent.
+This pattern integrates cleanly into broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/) by decoupling DataFrame materialization from the write boundary. Aligning DataFrame partitions with Delta's target file size prevents write amplification and ensures each Parquet file contains a single, contiguous spatial extent.
 
 ## Failure Modes & Deterministic Resolution
 

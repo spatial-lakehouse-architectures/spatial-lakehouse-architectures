@@ -1,6 +1,6 @@
 # Open Table Format Versioning in Spatial Lakehouse Architectures
 
-Version control for analytical datasets has shifted from fragile file overwrites to ACID-compliant snapshot isolation. In spatial lakehouse deployments, this capability must reconcile geometric precision, coordinate reference system (CRS) metadata, and high-cardinality spatial partitions. Building on the architectural patterns established in [Spatial Lakehouse Fundamentals & Architecture](/spatial-lakehouse-fundamentals-architecture/), this guide operationalizes versioning for Iceberg and Delta tables containing GIS workloads, with explicit focus on partitioning strategies, index maintenance, and CI/CD integration.
+Version control for analytical datasets has shifted from fragile file overwrites to ACID-compliant snapshot isolation. In spatial lakehouse deployments, this capability must reconcile geometric precision, coordinate reference system (CRS) metadata, and high-cardinality spatial partitions. Building on the architectural patterns established in [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/), this guide operationalizes versioning for Iceberg and Delta tables containing GIS workloads, with explicit focus on partitioning strategies, index maintenance, and CI/CD integration.
 
 ## Snapshot Mechanics & Spatial Metadata Propagation
 
@@ -8,7 +8,7 @@ Open table formats implement versioning through immutable data files paired with
 
 When versioning spatial datasets, the critical constraint is how geometric types are serialized and tracked across snapshots. Iceberg treats spatial columns as `BINARY` (WKB), requiring explicit bounding box columns alongside the geometry to surface coordinate bounds in manifest statistics. Silent coordinate truncation during schema changes is a real risk: always validate bbox statistics after any `ALTER TABLE` operation. Delta Lake similarly treats geometry as binary blobs or user-defined types, requiring explicit schema annotations and reader-side deserialization logic.
 
-For implementation specifics on WKB/WKT serialization pipelines and CRS propagation across commits, refer to [Iceberg Spatial Type Support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/). Serialization trade-offs and checkpoint validation steps are documented in [Delta Lake Geometry Handling](/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/).
+For implementation specifics on WKB/WKT serialization pipelines and CRS propagation across commits, refer to [Iceberg Spatial Type Support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/). Serialization trade-offs and checkpoint validation steps are documented in [Delta Lake Geometry Handling](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/delta-lake-geometry-handling/).
 
 To maintain interoperability across engines, enforce strict adherence to [OGC Simple Features](https://www.ogc.org/standards/sfs) geometry validation during ingestion. This prevents malformed polygons from corrupting downstream spatial joins or breaking time-travel queries.
 
@@ -91,7 +91,7 @@ ALTER TABLE delta.`s3://lakehouse/spatial_events` SET TBLPROPERTIES (
 VACUUM delta.`s3://lakehouse/spatial_events` RETAIN 168 HOURS;
 ```
 
-Always run retention jobs during low-traffic windows. Spatial compaction should be scheduled after Z-ordering to prevent index fragmentation. When evolving schemas across versions, review [Managing spatial schema evolution in open table formats](/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/managing-spatial-schema-evolution-in-open-table-formats/) to avoid CRS drift or precision loss during `ALTER TABLE` operations.
+Always run retention jobs during low-traffic windows. Spatial compaction should be scheduled after Z-ordering to prevent index fragmentation. When evolving schemas across versions, review [Managing spatial schema evolution in open table formats](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/managing-spatial-schema-evolution-in-open-table-formats/) to avoid CRS drift or precision loss during `ALTER TABLE` operations.
 
 ## CI/CD Integration for Spatial Versioning
 

@@ -1,6 +1,6 @@
 # DuckDB Geospatial Analytics on Lakehouse Tables
 
-DuckDB turns a laptop or a single warehouse node into a capable spatial query engine that reads GeoParquet and Apache Iceberg data straight from object storage, with no cluster to provision and no JVM to tune. Its `spatial` extension ships an R-tree index, a GEOS-backed predicate library, and native GeoParquet readers, while the `httpfs` and `iceberg` extensions let it pull byte ranges directly from S3. For data engineers who spend their day inside a distributed lakehouse but need fast, interactive spatial exploration — ad-hoc `ST_Intersects` filters, tile validation, or pre-aggregation before a heavier job — an embedded engine removes an enormous amount of operational friction. This topic area sits inside [Spatial Query Engines & Compute Optimization](/spatial-query-engines-compute/) and covers when single-node DuckDB is the right tool, how to wire it to lakehouse storage, and how to keep spatial joins fast when the working set outgrows memory.
+DuckDB turns a laptop or a single warehouse node into a capable spatial query engine that reads GeoParquet and Apache Iceberg data straight from object storage, with no cluster to provision and no JVM to tune. Its `spatial` extension ships an R-tree index, a GEOS-backed predicate library, and native GeoParquet readers, while the `httpfs` and `iceberg` extensions let it pull byte ranges directly from S3. For data engineers who spend their day inside a distributed lakehouse but need fast, interactive spatial exploration — ad-hoc `ST_Intersects` filters, tile validation, or pre-aggregation before a heavier job — an embedded engine removes an enormous amount of operational friction. This topic area sits inside [Spatial Query Engines & Compute Optimization](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/) and covers when single-node DuckDB is the right tool, how to wire it to lakehouse storage, and how to keep spatial joins fast when the working set outgrows memory.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DuckDB single-node engine reading GeoParquet and Iceberg from object storage through httpfs with an in-process R-tree">
@@ -47,7 +47,7 @@ The decision is almost always about data-scan volume versus operational cost, no
 | Ops budget | No cluster, embed in Python/CI/notebook | Team already running Spark/Trino |
 | Data location | GeoParquet or Iceberg in S3, read-mostly | Federated across many catalogs and sources |
 
-A useful heuristic: if the query would fit on one machine in PostGIS, DuckDB will handle it against the lakehouse without the ETL round-trip. For distributed alternatives, see the sibling topic areas [Trino spatial SQL federation](/spatial-query-engines-compute/trino-spatial-sql-federation/) and [Sedona distributed spatial compute](/spatial-query-engines-compute/sedona-distributed-spatial-compute/); to pick objectively across all three, the [engine benchmarking and selection](/spatial-query-engines-compute/engine-benchmarking-selection/) guide walks through a repeatable methodology.
+A useful heuristic: if the query would fit on one machine in PostGIS, DuckDB will handle it against the lakehouse without the ETL round-trip. For distributed alternatives, see the sibling topic areas [Trino spatial SQL federation](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/) and [Sedona distributed spatial compute](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/); to pick objectively across all three, the [engine benchmarking and selection](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/) guide walks through a repeatable methodology.
 
 ## Prerequisites and environment setup
 
@@ -107,7 +107,7 @@ count = con.execute("SELECT count(*) FROM buildings;").fetchone()[0]
 print(f"buildings rows visible: {count}")
 ```
 
-If the files were written by GeoPandas or Sedona with the standardized WKB encoding, `ST_GeomFromWKB` is a zero-copy reinterpretation. Understanding exactly how that column is laid out — and why `bbox` covering columns matter — is the subject of [GeoParquet encoding standards](/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/).
+If the files were written by GeoPandas or Sedona with the standardized WKB encoding, `ST_GeomFromWKB` is a zero-copy reinterpretation. Understanding exactly how that column is laid out — and why `bbox` covering columns matter — is the subject of [GeoParquet encoding standards](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/).
 
 ### 2. Build an R-tree over the geometry
 
@@ -120,7 +120,7 @@ CREATE INDEX buildings_rtree ON buildings_mat USING RTREE (geom);
 """)
 ```
 
-The R-tree only helps when the optimizer can push a bounding-box comparison against the indexed column; keep predicates in the `ST_Intersects(a, b)` form rather than wrapping the indexed geometry in a transform. The concrete join recipe lives in [how to run ST_Intersects in DuckDB on GeoParquet](/spatial-query-engines-compute/duckdb-geospatial-analytics/how-to-run-st-intersects-in-duckdb-on-geoparquet/).
+The R-tree only helps when the optimizer can push a bounding-box comparison against the indexed column; keep predicates in the `ST_Intersects(a, b)` form rather than wrapping the indexed geometry in a transform. The concrete join recipe lives in [how to run ST_Intersects in DuckDB on GeoParquet](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/how-to-run-st-intersects-in-duckdb-on-geoparquet/).
 
 ### 3. Filter with predicate pushdown on bbox
 
@@ -135,7 +135,7 @@ WHERE bbox.xmin <= 13.45 AND bbox.xmax >= 13.40
 """)
 ```
 
-This numeric bbox predicate is what makes lakehouse spatial queries cheap; the mechanics of how row-group and file skipping propagate through the reader are detailed in [predicate pushdown optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
+This numeric bbox predicate is what makes lakehouse spatial queries cheap; the mechanics of how row-group and file skipping propagate through the reader are detailed in [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
 
 ### 4. Read an Iceberg table
 
@@ -151,7 +151,7 @@ LIMIT 5;
 """)
 ```
 
-The full catalog-and-metadata walkthrough, including REST catalog wiring and snapshot selection, is in [querying Iceberg tables with the DuckDB spatial extension](/spatial-query-engines-compute/duckdb-geospatial-analytics/querying-iceberg-tables-with-duckdb-spatial-extension/).
+The full catalog-and-metadata walkthrough, including REST catalog wiring and snapshot selection, is in [querying Iceberg tables with the DuckDB spatial extension](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/querying-iceberg-tables-with-duckdb-spatial-extension/).
 
 ## Verification and testing
 
@@ -195,7 +195,7 @@ con.execute("SET temp_directory = '/mnt/nvme/duckdb_spill';")
 con.execute("SET preserve_insertion_order = false;")
 ```
 
-Concrete expectations on modern hardware: a point-in-polygon join of ~10M points against ~50k polygons with an R-tree completes in low single-digit seconds on 8 cores; the same without an index degrades to a full cross-check and can be 50–100x slower. Against S3, the dominant cost is round-trip latency, so a query touching many tiny files will be latency-bound regardless of CPU — compact GeoParquet to fewer, larger files first. When a spatial join's build side is genuinely larger than node memory even after pruning, that is the signal to move to [Sedona distributed spatial compute](/spatial-query-engines-compute/sedona-distributed-spatial-compute/) rather than fight the spill.
+Concrete expectations on modern hardware: a point-in-polygon join of ~10M points against ~50k polygons with an R-tree completes in low single-digit seconds on 8 cores; the same without an index degrades to a full cross-check and can be 50–100x slower. Against S3, the dominant cost is round-trip latency, so a query touching many tiny files will be latency-bound regardless of CPU — compact GeoParquet to fewer, larger files first. When a spatial join's build side is genuinely larger than node memory even after pruning, that is the signal to move to [Sedona distributed spatial compute](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/) rather than fight the spill.
 
 For raw scan throughput, prefer numeric bbox predicates over geometry predicates in the `WHERE` clause: the numeric form prunes at the row-group level before any WKB is decoded, whereas a geometry predicate can only filter after decode. Combine both — a cheap bbox pre-filter followed by an exact `ST_Intersects` refinement — to get pruning and correctness together.
 

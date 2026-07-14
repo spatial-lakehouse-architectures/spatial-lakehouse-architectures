@@ -1,6 +1,6 @@
 # Automating Lakehouse Maintenance for Spatial Tables
 
-Spatial lakehouse tables degrade faster than their non-spatial counterparts. Streaming ingestion of GPS pings, tiled raster footprints, and vector features produces thousands of small Parquet files per hour, each carrying heavy WKB payloads and wide bounding-box statistics; every micro-batch mints a new snapshot; and every schema drift in an upstream shapefile or GeoParquet export threatens the geometry column's type contract. Left alone, an Iceberg or Delta table serving spatial queries will accumulate file counts that blow up planning time, snapshot histories that bloat metadata, and silent CRS or geometry-type corruption that only surfaces when a downstream `ST_Intersects` returns garbage. This guide shows data engineers and platform teams how to automate the three maintenance disciplines that keep spatial tables healthy — compaction, snapshot expiration and vacuum, and pre-write schema validation — driven entirely from Python and scheduled through Airflow or GitHub Actions. It sits inside the broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/) section, and leans on the same PyIceberg, delta-rs, and PySpark tooling used across it.
+Spatial lakehouse tables degrade faster than their non-spatial counterparts. Streaming ingestion of GPS pings, tiled raster footprints, and vector features produces thousands of small Parquet files per hour, each carrying heavy WKB payloads and wide bounding-box statistics; every micro-batch mints a new snapshot; and every schema drift in an upstream shapefile or GeoParquet export threatens the geometry column's type contract. Left alone, an Iceberg or Delta table serving spatial queries will accumulate file counts that blow up planning time, snapshot histories that bloat metadata, and silent CRS or geometry-type corruption that only surfaces when a downstream `ST_Intersects` returns garbage. This guide shows data engineers and platform teams how to automate the three maintenance disciplines that keep spatial tables healthy — compaction, snapshot expiration and vacuum, and pre-write schema validation — driven entirely from Python and scheduled through Airflow or GitHub Actions. It sits inside the broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/) section, and leans on the same PyIceberg, delta-rs, and PySpark tooling used across it.
 
 ## When to use this
 
@@ -95,7 +95,7 @@ def build_spark(app: str = "spatial-maintenance") -> SparkSession:
     )
 ```
 
-For the Delta path you need no JVM at all: delta-rs runs the OPTIMIZE and VACUUM operations natively in Rust, which is why the [Delta-rs Geometry Processing](/python-ecosystem-integration-workflows/delta-rs-geometry-processing/) workflows are the natural home for lightweight, containerized maintenance jobs.
+For the Delta path you need no JVM at all: delta-rs runs the OPTIMIZE and VACUUM operations natively in Rust, which is why the [Delta-rs Geometry Processing](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/delta-rs-geometry-processing/) workflows are the natural home for lightweight, containerized maintenance jobs.
 
 ## Step-by-step implementation
 
@@ -130,11 +130,11 @@ def validate_batch(table: pa.Table, geom_col: str = "geometry") -> None:
         raise ValueError("null geometry values are not allowed")
 ```
 
-The full CI-integrated version — with CRS normalization, GeoParquet metadata checks, and a failing exit code — is covered in [building a schema validation pipeline for geospatial tables](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/). Wiring it upstream of ingestion complements the drift detection described in [detecting CRS drift in ingestion pipelines](/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/).
+The full CI-integrated version — with CRS normalization, GeoParquet metadata checks, and a failing exit code — is covered in [building a schema validation pipeline for geospatial tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/). Wiring it upstream of ingestion complements the drift detection described in [detecting CRS drift in ingestion pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/).
 
 ### Step 2 — Decide whether compaction is warranted
 
-Do not compact on a blind schedule; compact when file fragmentation actually justifies the rewrite cost. PyIceberg exposes the current data files — the same table-inspection surface used across [PyIceberg spatial workflows](/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/) — so you can compute per-partition file counts and average size cheaply before committing any Spark cluster time.
+Do not compact on a blind schedule; compact when file fragmentation actually justifies the rewrite cost. PyIceberg exposes the current data files — the same table-inspection surface used across [PyIceberg spatial workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/) — so you can compute per-partition file counts and average size cheaply before committing any Spark cluster time.
 
 ```python
 from pyiceberg.catalog import load_catalog
@@ -151,7 +151,7 @@ def needs_compaction(table_id: str, min_avg_mb: float = 64.0,
     return avg_mb < min_avg_mb or len(files) > max_files
 ```
 
-When the gate returns `True`, run the sort-based rewrite. The critical spatial detail is that the sort order must be on the bounding-box columns so that co-located geometries land in the same file — this is what makes later [predicate pushdown](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) prune files effectively. The complete recipe, including partial-progress and target-file-size tuning, is in [compacting spatial Iceberg tables with rewrite_data_files](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/).
+When the gate returns `True`, run the sort-based rewrite. The critical spatial detail is that the sort order must be on the bounding-box columns so that co-located geometries land in the same file — this is what makes later [predicate pushdown](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) prune files effectively. The complete recipe, including partial-progress and target-file-size tuning, is in [compacting spatial Iceberg tables with rewrite_data_files](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/).
 
 ```python
 def compact_iceberg(spark, table_fqn: str) -> None:
@@ -197,11 +197,11 @@ def _days_ago(n: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
 ```
 
-The Delta equivalent pairs `OPTIMIZE` (with Z-order on bbox columns) and `VACUUM`, and delta-rs enforces a 7-day retention floor by default that you should override only with eyes open. That full recipe, including how to guard time-travel SLAs, is in [scheduling VACUUM for spatial Delta tables](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/).
+The Delta equivalent pairs `OPTIMIZE` (with Z-order on bbox columns) and `VACUUM`, and delta-rs enforces a 7-day retention floor by default that you should override only with eyes open. That full recipe, including how to guard time-travel SLAs, is in [scheduling VACUUM for spatial Delta tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/).
 
 ### Step 4 — Schedule the whole loop
 
-Airflow expresses the dependency chain cleanly: validate is upstream of ingestion, compaction depends on ingestion, and expiration runs on its own slower cadence. Long-running Spark procedures should be dispatched off the scheduler thread — the same non-blocking principle developed in [async execution patterns](/python-ecosystem-integration-workflows/async-execution-patterns/).
+Airflow expresses the dependency chain cleanly: validate is upstream of ingestion, compaction depends on ingestion, and expiration runs on its own slower cadence. Long-running Spark procedures should be dispatched off the scheduler thread — the same non-blocking principle developed in [async execution patterns](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/async-execution-patterns/).
 
 ```python
 from airflow import DAG
@@ -231,7 +231,7 @@ with DAG(
     compact >> expire
 ```
 
-For teams without Airflow, a scheduled GitHub Actions workflow (`on: schedule: - cron`) running the same Python entrypoints against a warehouse credential in secrets is a lightweight substitute, and it doubles as the place your validation gate already lives if you validate GeoParquet in CI — see [validating GeoParquet metadata in CI](/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/).
+For teams without Airflow, a scheduled GitHub Actions workflow (`on: schedule: - cron`) running the same Python entrypoints against a warehouse credential in secrets is a lightweight substitute, and it doubles as the place your validation gate already lives if you validate GeoParquet in CI — see [validating GeoParquet metadata in CI](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/).
 
 ### Step 5 — Close the loop with monitoring
 
@@ -327,4 +327,4 @@ Expected ratios: a partition of 500 files averaging 12 MB compacts to roughly 45
 | Ingestion commits a re-typed geometry column and breaks downstream `ST_*` | No pre-write validation gate | Run the schema validation gate before every write; fail the pipeline on geometry-type or CRS violation |
 | Row count changes after a rewrite | A filter/where expression leaked into the rewrite options | Remove any `where` from the rewrite call; rewrites must be layout-only — verify with the bbox integrity query |
 
-Compaction, expiration, and validation are not independent chores — they compose into a single automated loop where validation protects the write, compaction protects query performance, and expiration protects storage cost, all under a scheduler that fires each only when monitoring says it is needed. Follow the three deep-dive guides for the complete, copy-paste implementations: [compacting spatial Iceberg tables with rewrite_data_files](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/), [scheduling VACUUM for spatial Delta tables](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/), and [building a schema validation pipeline for geospatial tables](/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/). For authoritative reference, consult the [Apache Iceberg maintenance documentation](https://iceberg.apache.org/docs/latest/maintenance/), the Iceberg [Spark procedures reference](https://iceberg.apache.org/docs/latest/spark-procedures/), and the [Delta Lake utility commands](https://docs.delta.io/latest/delta-utility.html).
+Compaction, expiration, and validation are not independent chores — they compose into a single automated loop where validation protects the write, compaction protects query performance, and expiration protects storage cost, all under a scheduler that fires each only when monitoring says it is needed. Follow the three deep-dive guides for the complete, copy-paste implementations: [compacting spatial Iceberg tables with rewrite_data_files](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/), [scheduling VACUUM for spatial Delta tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/), and [building a schema validation pipeline for geospatial tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/). For authoritative reference, consult the [Apache Iceberg maintenance documentation](https://iceberg.apache.org/docs/latest/maintenance/), the Iceberg [Spark procedures reference](https://iceberg.apache.org/docs/latest/spark-procedures/), and the [Delta Lake utility commands](https://docs.delta.io/latest/delta-utility.html).

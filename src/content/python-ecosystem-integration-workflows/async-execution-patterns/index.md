@@ -1,6 +1,6 @@
 # Async Execution Patterns
 
-Asynchronous execution is a foundational requirement for spatial data lakehouse architectures. Geospatial workloads—spanning high-frequency IoT telemetry, multi-petabyte satellite mosaics, and LiDAR point clouds—introduce severe I/O bottlenecks and compute skew that synchronous batch pipelines cannot absorb. By decoupling compute orchestration from storage mutations, platform teams achieve higher ingestion throughput while preserving strict ACID guarantees. This execution model integrates directly into the broader [Python Ecosystem & Integration Workflows](/python-ecosystem-integration-workflows/), where task schedulers, distributed executors, and format-specific APIs converge to handle spatial transformations without blocking the main pipeline thread or stalling downstream query engines.
+Asynchronous execution is a foundational requirement for spatial data lakehouse architectures. Geospatial workloads—spanning high-frequency IoT telemetry, multi-petabyte satellite mosaics, and LiDAR point clouds—introduce severe I/O bottlenecks and compute skew that synchronous batch pipelines cannot absorb. By decoupling compute orchestration from storage mutations, platform teams achieve higher ingestion throughput while preserving strict ACID guarantees. This execution model integrates directly into the broader [Python Ecosystem & Integration Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/), where task schedulers, distributed executors, and format-specific APIs converge to handle spatial transformations without blocking the main pipeline thread or stalling downstream query engines.
 
 <figure class="diagram">
 <svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Async geometry ingestion pipeline: submit, queue, worker pool, gather and commit">
@@ -51,7 +51,7 @@ CALL catalog.system.rewrite_data_files(
 );
 ```
 
-Delta Lake approaches the same problem through the `OPTIMIZE` command. Because Delta's optimistic concurrency control may require explicit retry logic when multiple async writers target the same partition, implement exponential backoff with jitter. Reference implementations for geometry-aware async dispatch are documented in [Delta-rs Geometry Processing](/python-ecosystem-integration-workflows/delta-rs-geometry-processing/), which covers Rust-backed parallel execution and safe concurrent writes.
+Delta Lake approaches the same problem through the `OPTIMIZE` command. Because Delta's optimistic concurrency control may require explicit retry logic when multiple async writers target the same partition, implement exponential backoff with jitter. Reference implementations for geometry-aware async dispatch are documented in [Delta-rs Geometry Processing](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/delta-rs-geometry-processing/), which covers Rust-backed parallel execution and safe concurrent writes.
 
 ```python
 import asyncio
@@ -92,7 +92,7 @@ asyncio.run(async_optimize_with_backoff(
 
 ## Metadata-Driven Indexing & Predicate Pushdown
 
-Spatial indexing in lakehouse formats is inherently metadata-driven. Iceberg stores partition specs, sort orders, and statistics in the metadata layer, enabling async index materialization via background `rewrite_data_files` operations. When integrating vectorized geometry operations, teams route index builds through [PyIceberg Spatial Workflows](/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/), leveraging `asyncio` to parallelize metadata refresh and spatial predicate caching across partition boundaries.
+Spatial indexing in lakehouse formats is inherently metadata-driven. Iceberg stores partition specs, sort orders, and statistics in the metadata layer, enabling async index materialization via background `rewrite_data_files` operations. When integrating vectorized geometry operations, teams route index builds through [PyIceberg Spatial Workflows](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/), leveraging `asyncio` to parallelize metadata refresh and spatial predicate caching across partition boundaries.
 
 Critical configuration for async metadata updates:
 - `write.metadata.compression-codec`: `zstd`

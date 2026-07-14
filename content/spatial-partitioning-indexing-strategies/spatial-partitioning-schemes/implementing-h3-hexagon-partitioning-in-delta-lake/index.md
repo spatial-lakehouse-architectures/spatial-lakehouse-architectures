@@ -9,7 +9,7 @@ Direct partitioning by `h3_index` at resolution 8 or 9 generates ~86 million or 
 The production fix decouples physical storage layout from logical spatial indexing:
 - **Physical Partition Key:** `h3_parent_res5` (or res 6). Coarse hexagons limit directory cardinality to approximately 2 million (res 5) or 14 million (res 6) globally, of which only a fraction will be populated for any given dataset.
 - **Logical Sort Key:** `ZORDER BY h3_index` within partitions. Preserves spatial locality while enabling Delta's data skipping engine to prune files via min/max statistics on the H3 integer value.
-- **Statistical Columns:** Materialize `h3_min_lat`, `h3_max_lat`, `h3_min_lon`, `h3_max_lon` as native `DOUBLE` columns. Unlike legacy [Spatial Partitioning Schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) that force rigid directory trees, this hybrid layout allows the query planner to skip irrelevant hex clusters at the partition level and prune individual Parquet files via columnar statistics.
+- **Statistical Columns:** Materialize `h3_min_lat`, `h3_max_lat`, `h3_min_lon`, `h3_max_lon` as native `DOUBLE` columns. Unlike legacy [Spatial Partitioning Schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) that force rigid directory trees, this hybrid layout allows the query planner to skip irrelevant hex clusters at the partition level and prune individual Parquet files via columnar statistics.
 
 ## 2. Production Write Pipeline
 

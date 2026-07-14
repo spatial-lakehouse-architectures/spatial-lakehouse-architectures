@@ -9,20 +9,25 @@
       </div>
     </div>
     <nav class="site-footer__nav" aria-label="Footer">
-      {% for pillar in site.pillars %}
-        {% set topics = collections.content | topicsOf(pillar.slug) %}
+      {% for section in site.sections %}
+        {% set topics = collections.content | topicsOf(section.slug) %}
         <section class="site-footer__col">
-          <h2 class="site-footer__heading" style="--pillar-color: {{ pillar.color }}">
-            <a href="/{{ pillar.slug }}/">{{ icon(pillar.icon) }} {{ pillar.title }}</a>
+          <h2 class="site-footer__heading" style="--section-color: {{ section.color }}">
+            <a href="{{ site.url }}/{{ section.slug }}/">{{ icon(section.icon) }} {{ section.title }}</a>
           </h2>
           <ul>
             {% for item in topics %}
-              <li><a href="{{ item.url }}">{{ item.data.title }}</a></li>
+              <li><a href="{{ site.url }}{{ item.url }}">{{ item.data.title }}</a></li>
             {% endfor %}
           </ul>
         </section>
       {% endfor %}
     </nav>
-    <p class="site-footer__legal">© {{ site.name }}. Built for {{ site.audience | lower }}</p>
+    <div class="site-footer__bottom">
+      <p class="site-footer__legal">© {{ site.name }}. Built for {{ site.audience | lower }}</p>
+      <a class="site-footer__social" href="https://github.com/spatial-lakehouse-architectures" aria-label="{{ site.name }} on GitHub" rel="noopener">
+        {{ icon("github") }}<span>GitHub</span>
+      </a>
+    </div>
   </div>
 </footer>

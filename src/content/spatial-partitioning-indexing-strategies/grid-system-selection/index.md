@@ -1,10 +1,10 @@
 # Selecting a Discrete Global Grid for Lakehouse Partitioning
 
-Choosing the discrete global grid that becomes your partition key is the single highest-leverage decision in a spatial lakehouse layout: it fixes cell shape, neighbor semantics, partition cardinality, and how cleanly the key maps onto Iceberg and Delta partition transforms. This topic area compares the three grids that dominate production data engineering — H3 (hexagonal), S2 (quadrilateral cells ordered along a Hilbert curve), and geohash (base-32 rectangles) — and gives you a defensible way to pick one and size its resolution. It sits inside the broader [Spatial Partitioning & Indexing Strategies](/spatial-partitioning-indexing-strategies/) section and assumes you have already ruled out naive range or hash partitioning on raw coordinates because of skew.
+Choosing the discrete global grid that becomes your partition key is the single highest-leverage decision in a spatial lakehouse layout: it fixes cell shape, neighbor semantics, partition cardinality, and how cleanly the key maps onto Iceberg and Delta partition transforms. This topic area compares the three grids that dominate production data engineering — H3 (hexagonal), S2 (quadrilateral cells ordered along a Hilbert curve), and geohash (base-32 rectangles) — and gives you a defensible way to pick one and size its resolution. It sits inside the broader [Spatial Partitioning & Indexing Strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/) section and assumes you have already ruled out naive range or hash partitioning on raw coordinates because of skew.
 
 ## When to use a discrete global grid
 
-A discrete global grid (DGG) earns its place when your access pattern is "give me everything near here" and your storage engine prunes on an equality or set predicate over a partition column. If your queries are pure bounding-box range scans, an in-file space-filling-curve layout via [Z-ordering for geospatial queries](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) may serve you better than a grid partition. Use the table below to decide.
+A discrete global grid (DGG) earns its place when your access pattern is "give me everything near here" and your storage engine prunes on an equality or set predicate over a partition column. If your queries are pure bounding-box range scans, an in-file space-filling-curve layout via [Z-ordering for geospatial queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) may serve you better than a grid partition. Use the table below to decide.
 
 | Signal in your workload | Favors | Why |
 |---|---|---|
@@ -14,7 +14,7 @@ A discrete global grid (DGG) earns its place when your access pattern is "give m
 | Equality lookups on a single partition column | any DGG | Grid id is a clean partition/bucket key |
 | Only axis-aligned bbox range scans | none — use Z-order | Grid adds cardinality without pruning benefit |
 
-The rest of this guide treats the grid id as a first-class partition column. For a wider comparison of grid schemes against space-filling curves and tree indexes, see [spatial partitioning schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/).
+The rest of this guide treats the grid id as a first-class partition column. For a wider comparison of grid schemes against space-filling curves and tree indexes, see [spatial partitioning schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/).
 
 ## How the three grids differ
 
@@ -133,7 +133,7 @@ def geohash_key(lat: float, lon: float, precision: int = 7) -> str:
     return geohash.encode(lat, lon, precision=precision)
 ```
 
-The resolution defaults above are deliberately chosen to yield roughly comparable cell footprints: H3 res 7 (~5 km² average), S2 level 13 (~1.3 km² average), geohash precision 7 (~150 m × 150 m). Resolution sizing, not the grid choice alone, controls partition cardinality — see [choosing an H3 resolution for point data](/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/) for the sizing method.
+The resolution defaults above are deliberately chosen to yield roughly comparable cell footprints: H3 res 7 (~5 km² average), S2 level 13 (~1.3 km² average), geohash precision 7 (~150 m × 150 m). Resolution sizing, not the grid choice alone, controls partition cardinality — see [choosing an H3 resolution for point data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/) for the sizing method.
 
 ### 2. Materialize the partition column
 
@@ -171,7 +171,7 @@ TBLPROPERTIES (
 );
 ```
 
-For Delta Lake, `partitionBy("h3_res7")` writes physical directories, so prefer a coarser resolution there; Iceberg's `bucket` transform is the safer high-cardinality choice. The concrete Delta directory-based flow is covered in [implementing H3 hexagon partitioning in Delta Lake](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
+For Delta Lake, `partitionBy("h3_res7")` writes physical directories, so prefer a coarser resolution there; Iceberg's `bucket` transform is the safer high-cardinality choice. The concrete Delta directory-based flow is covered in [implementing H3 hexagon partitioning in Delta Lake](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/implementing-h3-hexagon-partitioning-in-delta-lake/).
 
 ## Verification and testing
 
@@ -196,14 +196,14 @@ WHERE h3_res7 = '872830828ffffff'
   AND ts >= DATE '2024-10-01';
 ```
 
-A healthy plan lists the grid column under partition filters and shows a bucket/partition count far below the table total. If it does not, the predicate is being applied post-scan — see [predicate pushdown optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) for the pushdown checklist.
+A healthy plan lists the grid column under partition filters and shows a bucket/partition count far below the table total. If it does not, the predicate is being applied post-scan — see [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) for the pushdown checklist.
 
 ## Performance and tuning
 
 - **Resolution is the dominant knob.** Each H3 level multiplies cell count by ~7, each S2 level by 4, each geohash character by 32. Moving H3 res 7 → 8 roughly septuples partition cardinality. Size for 100 MB–1 GB of data per cell after compaction.
 - **Bucket count.** With `bucket(N, grid_id)`, set `N` so that `rows_per_bucket × avg_row_bytes` lands in the 128 MB–1 GB target. For a 500 GB daily table, `N` between 256 and 1024 is typical.
 - **Neighbor queries.** H3 `grid_disk(cell, k)` expands to a k-ring in one call; geohash needs `geohash.neighbors()` iterated per level and must handle base-32 seams; S2 uses `S2CellUnion` range covers. If your workload is ring-heavy, H3's constant 6-neighbor topology cuts query fan-out.
-- **Hot partitions.** Dense urban cells hold orders of magnitude more rows than rural ones. The `bucket` transform spreads a hot cell across files by hashing; without it, a single H3 cell over a city center becomes a multi-gigabyte partition that stalls compaction. Pair coarse grid partitions with intra-file [Z-ordering](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) on `lon, lat` to keep row groups locally clustered.
+- **Hot partitions.** Dense urban cells hold orders of magnitude more rows than rural ones. The `bucket` transform spreads a hot cell across files by hashing; without it, a single H3 cell over a city center becomes a multi-gigabyte partition that stalls compaction. Pair coarse grid partitions with intra-file [Z-ordering](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) on `lon, lat` to keep row groups locally clustered.
 - **Interop cost.** Geohash strings are self-describing and need no library to decode a bounding box, which lowers cross-team friction; H3 and S2 ids are opaque without their libraries.
 
 ## Common errors and fixes
@@ -216,4 +216,4 @@ A healthy plan lists the grid column under partition filters and shows a bucket/
 | Neighbor cells miss data at boundaries | Geohash base-32 seam or H3 pentagon distortion | Use `h3.grid_disk`; for geohash expand with `geohash.neighbors` on all 8 |
 | S2/H3 ids differ between ingest and query | Mismatched library version or resolution/level constant | Pin `h3>=4.1`, `s2sphere>=0.2.5`; centralize the resolution constant |
 
-Once you have chosen a grid, the two guides in this topic area go deeper: a full [head-to-head H3 vs S2 vs geohash comparison](/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/) with runnable cardinality benchmarks, and a data-driven method for [choosing an H3 resolution for point data](/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/). Authoritative references: the [H3 documentation](https://h3geo.org/docs/) and the [S2 Geometry library](https://s2geometry.io/).
+Once you have chosen a grid, the two guides in this topic area go deeper: a full [head-to-head H3 vs S2 vs geohash comparison](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/) with runnable cardinality benchmarks, and a data-driven method for [choosing an H3 resolution for point data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/). Authoritative references: the [H3 documentation](https://h3geo.org/docs/) and the [S2 Geometry library](https://s2geometry.io/).

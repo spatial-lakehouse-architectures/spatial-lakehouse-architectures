@@ -14,11 +14,11 @@ layout: layouts/base.njk
     <p class="hero__tagline">{{ site.tagline }}</p>
 
     <div class="hero__ctas">
-      {% for pillar in site.pillars %}
-        <a href="/{{ pillar.slug }}/" class="cta-button" style="--pillar-color: {{ pillar.color }}">
-          <span class="cta-button__icon">{{ icon(pillar.icon) }}</span>
+      {% for section in site.sections %}
+        <a href="{{ site.url }}/{{ section.slug }}/" class="cta-button" style="--section-color: {{ section.color }}">
+          <span class="cta-button__icon">{{ icon(section.icon) }}</span>
           <span class="cta-button__text">
-            <span class="cta-button__label">{{ pillar.title }}</span>
+            <span class="cta-button__label">{{ section.title }}</span>
             <span class="cta-button__hint">Jump to section {{ icon("arrow-right") }}</span>
           </span>
         </a>
@@ -33,48 +33,48 @@ layout: layouts/base.njk
     <p>{{ site.description }} The transition from monolithic spatial databases to a spatial data lakehouse is not a storage migration — it is a fundamental re-architecture of how geospatial data is serialized, versioned, indexed, and queried at scale.</p>
     <p>This site documents the engineering contracts required to make that architecture deliver: deterministic geometry serialization (WKB / GeoParquet), partition strategies that align with real query patterns, predicate pushdown that actually pushes down, and Python orchestration that respects snapshot isolation.</p>
     <p>Every guide is written for {{ site.audience | lower }} who own the pipeline end-to-end — from S3 buckets and catalog manifests to PySpark configurations and CI/CD validation gates. No vendor pitches, no toy examples; just patterns and trade-offs that survive contact with petabyte-scale data.</p>
-    <p>Pick a pillar below to explore deeper topics, troubleshooting matrices, and ready-to-paste configurations.</p>
+    <p>Pick a section below to explore deeper topics, troubleshooting matrices, and ready-to-paste configurations.</p>
   </div>
 </section>
 
 <section class="featured container">
   <div class="featured__head">
     <h2 class="section-title">Start here</h2>
-    <p class="featured__lead">The most-referenced engineering deep-dives — battle-tested patterns, troubleshooting matrices, and copy-ready configurations across every pillar.</p>
+    <p class="featured__lead">The most-referenced engineering deep-dives — battle-tested patterns, troubleshooting matrices, and copy-ready configurations across every section.</p>
   </div>
   <div class="featured__grid">
     {% for item in collections.content | deepGuides %}
-      {% set p = site.pillars | pillarBySlug(item.data.pillarSlug) %}
-      <article class="featured-card" style="--pillar-color: {{ p.color if p else site.themeColor }}">
-        <span class="featured-card__pillar">
+      {% set p = site.sections | sectionBySlug(item.data.sectionSlug) %}
+      <article class="featured-card" style="--section-color: {{ p.color if p else site.themeColor }}">
+        <span class="featured-card__section">
           {% if p %}{{ icon(p.icon) }}{% endif %}
-          <a href="/{{ item.data.pillarSlug }}/">{{ p.title if p else item.data.pillarSlug }}</a>
+          <a href="{{ site.url }}/{{ item.data.sectionSlug }}/">{{ p.title if p else item.data.sectionSlug }}</a>
         </span>
-        <h3 class="featured-card__title"><a href="{{ item.url }}">{{ item.data.title }}</a></h3>
+        <h3 class="featured-card__title"><a href="{{ site.url }}{{ item.url }}">{{ item.data.title }}</a></h3>
         <p class="featured-card__desc">{{ item.data.description }}</p>
-        <a class="featured-card__cta" href="{{ item.url }}">Read the guide {{ icon("arrow-right") }}</a>
+        <a class="featured-card__cta" href="{{ site.url }}{{ item.url }}">Read the guide {{ icon("arrow-right") }}</a>
       </article>
     {% endfor %}
   </div>
 </section>
 
-<section class="pillars container">
-  <h2 class="section-title">Explore the pillars</h2>
-  <div class="pillars__grid">
-    {% for pillar in site.pillars %}
-      {% set topics = collections.content | topicsOf(pillar.slug) %}
-      <article class="pillar-card" style="--pillar-color: {{ pillar.color }}">
-        <header class="pillar-card__header">
-          <span class="pillar-card__icon">{{ icon(pillar.icon) }}</span>
-          <h3 class="pillar-card__title"><a href="/{{ pillar.slug }}/">{{ pillar.title }}</a></h3>
+<section class="sections container">
+  <h2 class="section-title">Explore the sections</h2>
+  <div class="sections__grid">
+    {% for section in site.sections %}
+      {% set topics = collections.content | topicsOf(section.slug) %}
+      <article class="section-card" style="--section-color: {{ section.color }}">
+        <header class="section-card__header">
+          <span class="section-card__icon">{{ icon(section.icon) }}</span>
+          <h3 class="section-card__title"><a href="{{ site.url }}/{{ section.slug }}/">{{ section.title }}</a></h3>
         </header>
-        <p class="pillar-card__summary">{{ pillar.summary }}</p>
-        <ul class="pillar-card__topics">
+        <p class="section-card__summary">{{ section.summary }}</p>
+        <ul class="section-card__topics">
           {% for topic in topics %}
-            <li><a href="{{ topic.url }}">{{ topic.data.title }}</a></li>
+            <li><a href="{{ site.url }}{{ topic.url }}">{{ topic.data.title }}</a></li>
           {% endfor %}
         </ul>
-        <a class="pillar-card__cta" href="/{{ pillar.slug }}/">Open section {{ icon("arrow-right") }}</a>
+        <a class="section-card__cta" href="{{ site.url }}/{{ section.slug }}/">Open section {{ icon("arrow-right") }}</a>
       </article>
     {% endfor %}
   </div>

@@ -1,12 +1,12 @@
 # Bucket Mapping for Raster Data
 
-Raster datasets—satellite imagery, digital elevation models (DEMs), LiDAR derivatives, and climate reanalysis grids—introduce distinct storage and query challenges in modern data lakehouses. Unlike vector geometries, rasters are inherently grid-aligned, frequently exceed multi-terabyte scales, and exhibit highly localized, bounding-box-driven access patterns. Bucket mapping translates continuous spatial coordinates into discrete, query-optimized partition directories, enabling efficient predicate pushdown, metadata pruning, and predictable I/O behavior. This technique operates as a specialized implementation layer within broader [Spatial Partitioning & Indexing Strategies](/spatial-partitioning-indexing-strategies/), where physical storage layout must align tightly with downstream analytical and GIS processing workloads.
+Raster datasets—satellite imagery, digital elevation models (DEMs), LiDAR derivatives, and climate reanalysis grids—introduce distinct storage and query challenges in modern data lakehouses. Unlike vector geometries, rasters are inherently grid-aligned, frequently exceed multi-terabyte scales, and exhibit highly localized, bounding-box-driven access patterns. Bucket mapping translates continuous spatial coordinates into discrete, query-optimized partition directories, enabling efficient predicate pushdown, metadata pruning, and predictable I/O behavior. This technique operates as a specialized implementation layer within broader [Spatial Partitioning & Indexing Strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/), where physical storage layout must align tightly with downstream analytical and GIS processing workloads.
 
 ## Deterministic Coordinate Transformation & CRS Alignment
 
 Effective bucket mapping begins with deterministic coordinate transformation. Raw geographic coordinates (WGS84, EPSG:4326) introduce severe distortion and uneven bucket sizes at higher latitudes, making them unsuitable for direct partitioning. Production pipelines must project raster extents into a metric-aligned coordinate reference system (CRS) before computing bucket identifiers.
 
-For continental-scale ingestion, Universal Transverse Mercator (UTM) zones establish a natural, meter-based grid. The ingestion pipeline derives the UTM zone identifier, truncates easting/northing values to a fixed tile size, and hashes them into partition columns. See [Mapping UTM zones to Iceberg partition columns](/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/mapping-utm-zones-to-iceberg-partition-columns/) for detailed schema evolution patterns.
+For continental-scale ingestion, Universal Transverse Mercator (UTM) zones establish a natural, meter-based grid. The ingestion pipeline derives the UTM zone identifier, truncates easting/northing values to a fixed tile size, and hashes them into partition columns. See [Mapping UTM zones to Iceberg partition columns](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/mapping-utm-zones-to-iceberg-partition-columns/) for detailed schema evolution patterns.
 
 **Explicit Production Parameters:**
 - **Target CRS:** `EPSG:32633` (UTM Zone 33N)
@@ -18,7 +18,7 @@ This deterministic mapping ensures that adjacent spatial tiles map to predictabl
 
 ## Partition Hierarchy & Directory Layout
 
-Architecting the partition hierarchy requires balancing directory depth against query selectivity. [Spatial Partitioning Schemes](/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) outlines the trade-offs between coarse administrative boundaries, hierarchical quadtrees, and flat spatial hashing. For raster workloads, a two-tier partition strategy consistently delivers optimal query planner performance:
+Architecting the partition hierarchy requires balancing directory depth against query selectivity. [Spatial Partitioning Schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) outlines the trade-offs between coarse administrative boundaries, hierarchical quadtrees, and flat spatial hashing. For raster workloads, a two-tier partition strategy consistently delivers optimal query planner performance:
 
 1. **Coarse Partition:** `utm_zone`, `acquisition_year`, `sensor_type`
 2. **Bucket Partition:** `spatial_bucket` (string-encoded grid cell)
@@ -108,7 +108,7 @@ jobs:
 
 Bucket mapping enables the query planner to translate spatial predicates directly into directory scans. When a bounding box intersects multiple tiles, the engine computes the overlapping `spatial_bucket` range, reads only the relevant manifest entries, and skips non-matching partitions entirely. This reduces I/O by 60–85% compared to unpartitioned lakehouse scans.
 
-For multi-dimensional workloads combining spatial, temporal, and spectral filters, bucket mapping pairs effectively with [Z-Ordering for Geospatial Queries](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/). While bucket mapping handles coarse directory pruning, Z-ordering optimizes file-level data layout within those directories, minimizing the number of Parquet row groups scanned per query.
+For multi-dimensional workloads combining spatial, temporal, and spectral filters, bucket mapping pairs effectively with [Z-Ordering for Geospatial Queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/). While bucket mapping handles coarse directory pruning, Z-ordering optimizes file-level data layout within those directories, minimizing the number of Parquet row groups scanned per query.
 
 ## Operational Guardrails & Troubleshooting
 

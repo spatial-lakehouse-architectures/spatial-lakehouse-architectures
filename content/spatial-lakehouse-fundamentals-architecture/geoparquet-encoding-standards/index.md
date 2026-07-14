@@ -4,7 +4,7 @@ GeoParquet is the convention that turns an ordinary Parquet file into a self-des
 
 ## When to use file-level GeoParquet metadata
 
-The core decision is whether to lean on GeoParquet's file-level `geo` metadata or to treat geometry as a plain WKB `BINARY` column with the spatial contract enforced entirely in your pipeline. The metadata approach buys interoperability and self-description; the raw-column approach buys engine-agnostic simplicity at the cost of every reader needing out-of-band knowledge of the CRS and encoding. The table below frames the choice; the dedicated [GeoParquet vs WKB column storage trade-offs](/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/geoparquet-vs-wkb-column-storage-trade-offs/) guide runs the full comparison with runnable code for both.
+The core decision is whether to lean on GeoParquet's file-level `geo` metadata or to treat geometry as a plain WKB `BINARY` column with the spatial contract enforced entirely in your pipeline. The metadata approach buys interoperability and self-description; the raw-column approach buys engine-agnostic simplicity at the cost of every reader needing out-of-band knowledge of the CRS and encoding. The table below frames the choice; the dedicated [GeoParquet vs WKB column storage trade-offs](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/geoparquet-vs-wkb-column-storage-trade-offs/) guide runs the full comparison with runnable code for both.
 
 | Requirement | GeoParquet file metadata | Raw WKB `BINARY` column |
 |---|---|---|
@@ -14,7 +14,7 @@ The core decision is whether to lean on GeoParquet's file-level `geo` metadata o
 | Works with engines that ignore `geo` | Degrades to a binary column | Always |
 | Round-trips through Iceberg/Delta metadata | Partial — table formats may drop file KV metadata | Full — it is just a column |
 
-Reach for file-level metadata when the same physical files are read by heterogeneous tools or handed to external consumers. Reach for raw WKB columns, plus explicit bounding-box columns, when the files live behind an [Iceberg spatial table](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) whose catalog is the single source of truth and whose manifest statistics already drive [predicate pushdown](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
+Reach for file-level metadata when the same physical files are read by heterogeneous tools or handed to external consumers. Reach for raw WKB columns, plus explicit bounding-box columns, when the files live behind an [Iceberg spatial table](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) whose catalog is the single source of truth and whose manifest statistics already drive [predicate pushdown](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/).
 
 ## Architecture: what lives inside a GeoParquet file
 
@@ -92,7 +92,7 @@ assert tuple(int(p) for p in geopandas.__version__.split(".")[:2]) >= (1, 0)
 
 ### Step 1 — Build a GeoDataFrame with an explicit CRS
 
-Never let the CRS default. Set it explicitly with the numeric EPSG code so the written PROJJSON is deterministic. Silent CRS assumptions are the root cause of most downstream join failures; the [CRS management pipelines](/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/) section covers enforcing this at ingest, and [detecting CRS drift in ingestion pipelines](/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/) covers catching it after the fact.
+Never let the CRS default. Set it explicitly with the numeric EPSG code so the written PROJJSON is deterministic. Silent CRS assumptions are the root cause of most downstream join failures; the [CRS management pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/) section covers enforcing this at ingest, and [detecting CRS drift in ingestion pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/) covers catching it after the fact.
 
 ```python
 import geopandas
@@ -131,7 +131,7 @@ gdf.to_parquet(
 
 ### Step 3 — Inspect the `geo` footer metadata
 
-Read the footer key-value metadata straight from pyarrow to confirm exactly what was written. This is the same block a CI gate should assert on, as detailed in [validating GeoParquet metadata in CI](/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/).
+Read the footer key-value metadata straight from pyarrow to confirm exactly what was written. This is the same block a CI gate should assert on, as detailed in [validating GeoParquet metadata in CI](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/).
 
 ```python
 import json
@@ -181,7 +181,7 @@ A correct write yields a `bbox` struct column visible in the Parquet schema, `co
 
 ## Performance and tuning
 
-The covering bbox only helps if geometries are spatially clustered within row groups; a randomly ordered file has row-group bounds that all overlap the query window, defeating skipping. Sort by a space-filling key before writing so nearby features share row groups — the same clustering discipline that [predicate pushdown optimization](/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) depends on.
+The covering bbox only helps if geometries are spatially clustered within row groups; a randomly ordered file has row-group bounds that all overlap the query window, defeating skipping. Sort by a space-filling key before writing so nearby features share row groups — the same clustering discipline that [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) depends on.
 
 - **Row-group size**: keep the Parquet row group at 64–128 MB (`row_group_size` measured in rows for your average geometry width). Smaller groups give finer skipping granularity but inflate footer metadata; larger groups coarsen the bbox and read amplification climbs.
 - **Compression**: `zstd` at level 3 typically beats `snappy` by 20–35% on WKB polygon columns with negligible decode cost. WKB compresses poorly compared to coordinate-delta encodings, so this matters.
@@ -198,4 +198,4 @@ The covering bbox only helps if geometries are spatially clustered within row gr
 | Trino/Sedona ignores the `covering` bbox | Engine reads 1.0 metadata only | Keep explicit `DOUBLE` bbox columns as a fallback; verify engine GeoParquet 1.1 support |
 | Table-format read drops the `geo` block | Iceberg/Delta may not surface file KV metadata to the engine | Store CRS/encoding in table properties too; treat catalog as source of truth |
 
-Standardizing GeoParquet encoding is the file-level half of a spatial lakehouse contract; the catalog-level half lives in [Iceberg spatial type support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) and the broader [Spatial Lakehouse Fundamentals & Architecture](/spatial-lakehouse-fundamentals-architecture/) section. Anchor every implementation to the canonical [GeoParquet specification](https://geoparquet.org/) and the [OGC Simple Features](https://www.ogc.org/standard/sfa/) coordinate model so the metadata you write stays portable across the entire tool ecosystem.
+Standardizing GeoParquet encoding is the file-level half of a spatial lakehouse contract; the catalog-level half lives in [Iceberg spatial type support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) and the broader [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/) section. Anchor every implementation to the canonical [GeoParquet specification](https://geoparquet.org/) and the [OGC Simple Features](https://www.ogc.org/standard/sfa/) coordinate model so the metadata you write stays portable across the entire tool ecosystem.

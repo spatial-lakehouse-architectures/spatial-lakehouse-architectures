@@ -1,6 +1,6 @@
 # Distributed Spatial Compute with Apache Sedona
 
-Apache Sedona (formerly GeoSpark) extends Spark 3.5 with a distributed spatial type system, spatial partitioners, and index-backed join operators, making it the tool of choice when a spatial join is too large for any single machine. Where a single-node engine loads one dataset into memory, Sedona shards billions of geometries across a Spark cluster, builds a distributed spatial index (KDB-tree or quad-tree), and executes range and join queries in parallel. This topic area covers the `SpatialRDD` and Sedona SQL programming models, spatial partitioning and index construction, reading and writing both Apache Iceberg and GeoParquet from Sedona, and the concrete threshold at which distribution beats single-node [DuckDB geospatial analytics](/spatial-query-engines-compute/duckdb-geospatial-analytics/). It belongs to the [Spatial Query Engines & Compute Optimization](/spatial-query-engines-compute/) section and complements the SQL-federation approach in [Trino spatial SQL and cross-catalog federation](/spatial-query-engines-compute/trino-spatial-sql-federation/).
+Apache Sedona (formerly GeoSpark) extends Spark 3.5 with a distributed spatial type system, spatial partitioners, and index-backed join operators, making it the tool of choice when a spatial join is too large for any single machine. Where a single-node engine loads one dataset into memory, Sedona shards billions of geometries across a Spark cluster, builds a distributed spatial index (KDB-tree or quad-tree), and executes range and join queries in parallel. This topic area covers the `SpatialRDD` and Sedona SQL programming models, spatial partitioning and index construction, reading and writing both Apache Iceberg and GeoParquet from Sedona, and the concrete threshold at which distribution beats single-node [DuckDB geospatial analytics](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/). It belongs to the [Spatial Query Engines & Compute Optimization](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/) section and complements the SQL-federation approach in [Trino spatial SQL and cross-catalog federation](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/).
 
 ## When to use this
 
@@ -120,11 +120,11 @@ result = sedona.sql("""
 result.cache()
 ```
 
-For the small-reference-layer case where a broadcast is cheaper than a shuffle, use the explicit broadcast hint pattern documented in [broadcast spatial joins with Apache Sedona](/spatial-query-engines-compute/sedona-distributed-spatial-compute/broadcast-spatial-joins-with-apache-sedona/).
+For the small-reference-layer case where a broadcast is cheaper than a shuffle, use the explicit broadcast hint pattern documented in [broadcast spatial joins with Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/broadcast-spatial-joins-with-apache-sedona/).
 
 ### 3. Write results back to Iceberg
 
-Encode the geometry back to WKB before writing so the Iceberg schema stays engine-neutral and readable by Trino and DuckDB (the encoding contract is covered under [Iceberg spatial type support](/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/)).
+Encode the geometry back to WKB before writing so the Iceberg schema stays engine-neutral and readable by Trino and DuckDB (the encoding contract is covered under [Iceberg spatial type support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/)).
 
 ```python
 from pyspark.sql.functions import expr
@@ -161,7 +161,7 @@ Sedona performance is dominated by partition balance and index construction cost
 - `spark.sql.autoBroadcastJoinThreshold`: raise it (or use an explicit hint) when the reference side is under ~100 MB so Sedona broadcasts instead of shuffling.
 - `spark.executor.memory` / `spark.memory.fraction`: geometry objects and R-tree nodes are heap-heavy; budget 8–16 GB per executor for 100M+ geometry joins and enable off-heap if GC pauses dominate.
 
-At the crossover point, a distributed join over ~500 GB with balanced KDB-tree partitions typically runs 3–8x faster than a single node that has to spill; below ~50 GB the single node wins because Sedona's job-startup and shuffle costs are not amortized. Pre-sorting the Iceberg source with [Z-ordering](/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) cuts the bytes read before partitioning even begins.
+At the crossover point, a distributed join over ~500 GB with balanced KDB-tree partitions typically runs 3–8x faster than a single node that has to spill; below ~50 GB the single node wins because Sedona's job-startup and shuffle costs are not amortized. Pre-sorting the Iceberg source with [Z-ordering](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/) cuts the bytes read before partitioning even begins.
 
 ## Common errors and fixes
 
@@ -173,4 +173,4 @@ At the crossover point, a distributed join over ~500 GB with balanced KDB-tree p
 | Executors OOM during index build | Too many geometries per partition | Increase `numpartition`; raise `spark.executor.memory`; enable spill |
 | Downstream engines can't read output geometry | Wrote Sedona `Geometry` type directly | Convert with `ST_AsBinary` to WKB before `writeTo(...).using("iceberg")` |
 
-For authoritative API and configuration reference, consult the [Apache Sedona documentation](https://sedona.apache.org/latest/) and the [Sedona spatial join tuning guide](https://sedona.apache.org/latest/tutorial/sql/#optimize-spatial-join). To decide empirically whether Sedona, Trino, or DuckDB fits a given workload, run the harness in [benchmarking spatial query engines on GeoParquet](/spatial-query-engines-compute/engine-benchmarking-selection/benchmarking-spatial-query-engines-on-geoparquet/).
+For authoritative API and configuration reference, consult the [Apache Sedona documentation](https://sedona.apache.org/latest/) and the [Sedona spatial join tuning guide](https://sedona.apache.org/latest/tutorial/sql/#optimize-spatial-join). To decide empirically whether Sedona, Trino, or DuckDB fits a given workload, run the harness in [benchmarking spatial query engines on GeoParquet](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/benchmarking-spatial-query-engines-on-geoparquet/).

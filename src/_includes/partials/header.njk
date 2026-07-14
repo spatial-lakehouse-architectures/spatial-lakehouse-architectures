@@ -2,7 +2,7 @@
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header" role="banner">
   <div class="container site-header__inner">
-    <a href="/" class="site-header__brand" aria-label="{{ site.name }} home">
+    <a href="{{ site.url }}/" class="site-header__brand" aria-label="{{ site.name }} home">
       {% include "partials/logo.njk" %}
       <span class="site-header__title">
         <span class="site-header__title-main">Spatial Lakehouse</span>
@@ -18,14 +18,14 @@
     <nav id="primary-nav" class="site-nav" aria-label="Primary">
       <ul class="site-nav__list">
         <li>
-          <a class="site-nav__link {% if page.url == '/' %}is-active{% endif %}" href="/">
+          <a class="site-nav__link {% if page.url == '/' %}is-active{% endif %}" href="{{ site.url }}/">
             {{ icon("home") }}<span>Home</span>
           </a>
         </li>
-        {% for pillar in site.pillars %}
+        {% for section in site.sections %}
           <li>
-            <a class="site-nav__link {% if pillarSlug == pillar.slug %}is-active{% endif %}" href="/{{ pillar.slug }}/" style="--pillar-color: {{ pillar.color }}">
-              {{ icon(pillar.icon) }}<span>{{ pillar.title | replace(' & ', ' & ') }}</span>
+            <a class="site-nav__link {% if sectionSlug == section.slug %}is-active{% endif %}" href="{{ site.url }}/{{ section.slug }}/" style="--section-color: {{ section.color }}">
+              {{ icon(section.icon) }}<span>{{ section.title | replace(' & ', ' & ') }}</span>
             </a>
           </li>
         {% endfor %}

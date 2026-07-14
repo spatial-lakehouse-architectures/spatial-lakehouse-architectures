@@ -181,12 +181,12 @@ module.exports = function (eleventyConfig) {
     });
   });
 
-  eleventyConfig.addFilter("topicsOf", (collection, pillarSlug) => {
-    if (!Array.isArray(collection) || !pillarSlug) return [];
-    const hub = "/" + pillarSlug + "/";
+  eleventyConfig.addFilter("topicsOf", (collection, sectionSlug) => {
+    if (!Array.isArray(collection) || !sectionSlug) return [];
+    const sectionRoot = "/" + sectionSlug + "/";
     return collection.filter((item) => {
-      if (!item.url || !item.url.startsWith(hub) || item.url === hub) return false;
-      const rest = item.url.slice(hub.length).replace(/\/$/, "");
+      if (!item.url || !item.url.startsWith(sectionRoot) || item.url === sectionRoot) return false;
+      const rest = item.url.slice(sectionRoot.length).replace(/\/$/, "");
       return rest.length > 0 && !rest.includes("/");
     });
   });
@@ -202,9 +202,9 @@ module.exports = function (eleventyConfig) {
     return typeof limit === "number" ? guides.slice(0, limit) : guides;
   });
 
-  eleventyConfig.addFilter("pillarBySlug", (pillars, slug) => {
-    if (!Array.isArray(pillars)) return null;
-    return pillars.find((p) => p.slug === slug) || null;
+  eleventyConfig.addFilter("sectionBySlug", (sections, slug) => {
+    if (!Array.isArray(sections)) return null;
+    return sections.find((p) => p.slug === slug) || null;
   });
 
   eleventyConfig.addFilter("siblingsOf", (collection, currentUrl) => {
@@ -225,8 +225,8 @@ module.exports = function (eleventyConfig) {
     api.getAll().filter((item) => item.data.layout === "content.njk")
   );
 
-  eleventyConfig.addCollection("pillars", (api) =>
-    api.getAll().filter((item) => item.data.pillar && item.data.isPillarHub)
+  eleventyConfig.addCollection("sections", (api) =>
+    api.getAll().filter((item) => item.data.section && item.data.isSectionLanding)
   );
 
   return {

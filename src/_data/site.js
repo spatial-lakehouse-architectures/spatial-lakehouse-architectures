@@ -10,7 +10,7 @@ module.exports = {
     "Data engineers, platform architects, GIS backend developers, and cloud/infrastructure teams.",
   themeColor: "#0e6e7d",
   backgroundColor: "#f6f3ec",
-  pillars: [
+  sections: [
     {
       slug: "spatial-lakehouse-fundamentals-architecture",
       title: "Spatial Lakehouse Fundamentals & Architecture",
