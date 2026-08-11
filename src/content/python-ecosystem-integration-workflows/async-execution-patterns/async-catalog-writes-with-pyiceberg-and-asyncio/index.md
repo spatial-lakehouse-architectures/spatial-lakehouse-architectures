@@ -139,13 +139,13 @@ print("distinct zones:", len(set(df.column("utm_zone").to_pylist())))  # 6
 Seeing one `append` snapshot per zone with `added-records = 5000` each, and a total of 30000 rows across six distinct `utm_zone` values, proves the concurrent writes all landed under proper isolation with no lost updates. For the schema-side of this pipeline — turning GeoDataFrames into the Arrow tables you commit here — see [mapping GeoPandas DataFrames to Arrow schemas](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/dataframe-mapping-strategies/mapping-geopandas-dataframes-to-arrow-schemas/).
 
 <figure class="diagram">
-<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Concurrent Arrow builds funneling through a semaphore and a serialized commit lock into an Iceberg table">
+<svg viewBox="0 0 747 226" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Concurrent Arrow builds funneling through a semaphore and a serialized commit lock into an Iceberg table">
 <title>Async build, serialized commit</title>
 <desc>Multiple UTM-zone partitions build Arrow tables in parallel under a semaphore, then pass one at a time through a commit lock that appends each as its own Iceberg snapshot with retry on conflict.</desc>
 <defs>
 <marker id="arw-pyice-async" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0 L9 4 L0 8 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="260" fill="#f7fbfc"/>
+<rect x="0" y="0" width="747" height="226" fill="#f7fbfc"/>
 <text x="90" y="30" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">build (executor)</text>
 <rect x="20" y="45" width="140" height="34" rx="5" fill="#ffffff" stroke="#2f6e49"/><text x="90" y="67" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">zone 32U -> Arrow</text>
 <rect x="20" y="90" width="140" height="34" rx="5" fill="#ffffff" stroke="#2f6e49"/><text x="90" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">zone 33U -> Arrow</text>
@@ -172,3 +172,67 @@ Seeing one `append` snapshot per zone with `added-records = 5000` each, and a to
 </figure>
 
 The essential discipline is that concurrency lives in the build-and-upload stage while the commit stage stays serial and idempotent under retry — a shape that generalizes to any open-table-format writer. For the broader concurrency toolbox this draws on, return to [async execution patterns](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/async-execution-patterns/), and consult the [PyIceberg API documentation](https://py.iceberg.apache.org/api/) for commit and snapshot semantics.
+
+## The Two Stages That Must Not Be Concurrent Together
+
+The recipe above separates writing data files from committing them, and that separation is the load-bearing part of the design rather than a stylistic choice.
+
+<figure class="diagram">
+<svg viewBox="0 0 758 254" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Concurrent data file writes feeding a single sequential commit coordinator, contrasted with concurrent commits which conflict and retry">
+<defs>
+<marker id="acw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2f6e49"/></marker>
+</defs>
+<rect x="0" y="0" width="758" height="254" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Parallel writes, sequential commits</text>
+<rect x="34" y="62" width="130" height="42" rx="6" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="99" y="88" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">write batch 1</text>
+<rect x="34" y="114" width="130" height="42" rx="6" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="99" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">write batch 2</text>
+<rect x="34" y="166" width="130" height="42" rx="6" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="99" y="192" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">write batch 3</text>
+<rect x="240" y="104" width="200" height="62" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="340" y="130" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">semaphore</text>
+<text x="340" y="150" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">bounds bytes in flight</text>
+<line x1="164" y1="83" x2="240" y2="122" stroke="#2f6e49" stroke-width="2" marker-end="url(#acw-arrow)"/>
+<line x1="164" y1="135" x2="240" y2="135" stroke="#2f6e49" stroke-width="2" marker-end="url(#acw-arrow)"/>
+<line x1="164" y1="187" x2="240" y2="148" stroke="#2f6e49" stroke-width="2" marker-end="url(#acw-arrow)"/>
+<rect x="516" y="104" width="230" height="62" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="631" y="130" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">one commit, all files</text>
+<text x="631" y="150" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">no conflict possible</text>
+<line x1="440" y1="135" x2="516" y2="135" stroke="#2f6e49" stroke-width="2" marker-end="url(#acw-arrow)"/>
+<text x="390" y="238" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Commits are metadata-only, so serialising them costs almost nothing</text>
+</svg>
+</figure>
+
+Writing data files is genuinely parallel work: each produces an independent object in storage, nothing coordinates, and throughput scales with concurrency until the network saturates. Committing is the opposite — it is a compare-and-swap against table metadata, and running several concurrently produces conflicts whose retries cost more than the serialisation would have.
+
+Because a commit carries a *list* of files, one commit can publish everything the concurrent writers produced. That collapses N potential conflicts into zero and reduces snapshot count by the same factor, which keeps table metadata small — a benefit that compounds over months in a way the throughput gain does not.
+
+## Sizing the Semaphore From Real Batches
+
+<figure class="diagram">
+<svg viewBox="0 0 758 212" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Semaphore sizing worked from three inputs: memory budget for in-flight buffers, measured serialised size of one batch, and the resulting concurrency limit">
+<rect x="0" y="0" width="758" height="212" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">One division, measured rather than guessed</text>
+<rect x="34" y="66" width="200" height="88" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="134" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">memory budget</text>
+<text x="134" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">e.g. 4 GB for buffers</text>
+<text x="264" y="118" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="700" fill="#33707d">÷</text>
+<rect x="294" y="66" width="200" height="88" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="394" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">serialised batch size</text>
+<text x="394" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">measure one, do not guess</text>
+<text x="524" y="118" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="700" fill="#33707d">=</text>
+<rect x="554" y="66" width="192" height="88" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="650" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">concurrency limit</text>
+<text x="650" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">typically 8–32</text>
+<text x="390" y="196" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Wide polygon batches land at the low end; point batches at the high end</text>
+</svg>
+</figure>
+
+Measure the batch size with `pa.Table.nbytes` on a representative batch rather than estimating from the row count, because the ratio between the two varies by two orders of magnitude between point telemetry and complex boundary data. Then assert the resulting peak memory in a test, so a change to the batch composition surfaces as a failing assertion rather than as an out-of-memory kill in production.
+
+Finally, keep the concurrency limit configurable rather than hard-coded. The right value differs between the batch job that writes wide boundary polygons and the streaming job that writes points, and a single constant will be wrong for one of them. Reading it from configuration also makes it tunable during an incident without a deployment, which is the moment the tuning is most needed.
+Log the effective value at start-up so a run can be reproduced from its own output rather than from whatever configuration happened to be deployed at the time.
+A configuration value that appears in the logs is a configuration value somebody can reason about six months later.
+Keeping it there costs one log line and saves an argument.
+It also lets an operator answer the tuning question without reading the source.

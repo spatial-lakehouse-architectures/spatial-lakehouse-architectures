@@ -22,12 +22,12 @@ If your workload straddles rows, treat that as a signal to benchmark rather than
 A credible benchmark isolates the engine under test behind an identical workload contract: the same GeoParquet dataset, the same logical query, the same success criteria. Everything else — the storage layer, the metrics collector, the result store — is shared. The diagram shows the data path and the decision that falls out of it.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spatial benchmark harness feeding a decision matrix that maps workload shape to DuckDB, Trino, or Sedona">
+<svg viewBox="0 0 752 327" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spatial benchmark harness feeding a decision matrix that maps workload shape to DuckDB, Trino, or Sedona">
 <defs>
 <marker id="arw-bench" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 <marker id="arw-bench-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2f6e49"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="340" fill="#f7fbfc"/>
+<rect x="0" y="0" width="752" height="327" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Benchmark harness and engine decision path</text>
 <rect x="30" y="55" width="150" height="60" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
 <text x="105" y="80" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#0d3b45">GeoParquet</text>
@@ -229,3 +229,68 @@ The decision matrix that falls out is stable even when the absolute numbers are 
 | DuckDB caps at a few cores on a large box | Default thread/memory limits | `SET threads`, `SET memory_limit` to the physical machine size before running |
 
 For the concrete, runnable three-engine harness that produces the results table this method depends on, work through [benchmarking spatial query engines on GeoParquet](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/benchmarking-spatial-query-engines-on-geoparquet/). For authoritative engine references, see the [DuckDB spatial extension docs](https://duckdb.org/docs/stable/core_extensions/spatial/overview), the [Trino geospatial functions](https://trino.io/docs/current/functions/geospatial.html), and the [Apache Sedona SQL reference](https://sedona.apache.org/latest/api/sql/Overview/).
+
+## Designing a Benchmark That Predicts Production
+
+Most spatial engine benchmarks fail not because the measurements are wrong but because they measure something that does not determine production behaviour.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 284" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four dimensions a spatial benchmark must vary to be predictive: query shape, data layout, concurrency and cache state, each with the wrong and right way to set it">
+<rect x="0" y="0" width="762" height="284" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Four dimensions that decide whether a benchmark predicts anything</text>
+<rect x="30" y="56" width="352" height="100" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="206" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">query shape</text>
+<text x="206" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">wrong: one big spatial join</text>
+<text x="206" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">right: the mix production actually runs</text>
+<rect x="398" y="56" width="352" height="100" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="574" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">data layout</text>
+<text x="574" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">wrong: unsorted, unpartitioned export</text>
+<text x="574" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">right: the layout you will ship</text>
+<rect x="30" y="172" width="352" height="100" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="198" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">concurrency</text>
+<text x="206" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">wrong: one query at a time</text>
+<text x="206" y="246" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">right: the concurrency you expect</text>
+<rect x="398" y="172" width="352" height="100" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="198" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">cache state</text>
+<text x="574" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">wrong: warm, after ten runs</text>
+<text x="574" y="246" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">right: report cold and warm separately</text>
+</svg>
+</figure>
+
+The layout dimension is the one that most often inverts the result. Benchmarking three engines against an unsorted, unpartitioned export measures how fast each can scan everything, which is a real property and not the one that will determine production latency — because production will have a partition key and a sort order, and the ranking under those conditions can be entirely different. Benchmark the layout you intend to ship, or the exercise measures a system you will not operate.
+
+The concurrency dimension is the second most common inversion, for the reasons set out in the section overview: an in-process engine that wins alone can lose badly under a shared workload. If the production shape is many concurrent users, a single-query benchmark is not a simplification of it — it is a different question.
+
+## Reporting the Result So It Survives Scrutiny
+
+A benchmark's value depends on whether anyone believes it six months later, and belief comes from the report rather than from the numbers.
+
+Record the **layout** — partition key, sort order, file size distribution, statistics configuration — because it is the variable that most changes the ranking and the one least often written down. Record the **data**: row count, geometry complexity distribution, total compressed size, and the extent. Record the **queries** verbatim, including the predicate forms, since a bounding-box predicate present in one engine's variant and absent in another's invalidates the comparison entirely. And record the **environment**: instance types, storage class, whether caches were cold, and the versions of every engine.
+
+Report per-query rather than as a single aggregate. A geometric mean across a query mix hides the case that matters, and the case that matters is usually the one where an engine was ten times slower rather than the ones where it was twenty percent faster. Publish the distribution and let the reader judge which queries resemble their workload.
+
+Finally, state the decision the benchmark was run to inform, and state what result would have changed it. A benchmark run to confirm a decision already made is a different exercise from one run to make it, and being explicit about which this was saves the next reader from over-interpreting the numbers. The most useful benchmarks on this site's subject end with a sentence of the form "we chose X; had Y been within 20% on the concurrent mix, we would have chosen it instead" — which is a far more durable artefact than a table of timings.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 222" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Benchmark report template listing the four sections a durable result needs: decision under test, configuration, per query results, and the threshold that would have changed the answer">
+<rect x="0" y="0" width="762" height="222" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">What a durable benchmark report contains</text>
+<rect x="30" y="56" width="352" height="70" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="206" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">1. the decision under test</text>
+<text x="206" y="104" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">stated before the numbers</text>
+<rect x="398" y="56" width="352" height="70" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="574" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">2. configuration in full</text>
+<text x="574" y="104" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">layout, data, environment, versions</text>
+<rect x="30" y="140" width="352" height="70" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="166" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">3. per-query results</text>
+<text x="206" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">distribution, not a single mean</text>
+<rect x="398" y="140" width="352" height="70" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="166" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">4. the falsifying threshold</text>
+<text x="574" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">what result would have changed the answer</text>
+</svg>
+</figure>
+
+The fourth box is what makes the report re-usable. A year later, when an engine has had four releases and someone asks whether the decision still holds, a stated threshold turns the re-evaluation into a single measurement rather than a repeat of the whole exercise.
+That is the difference between a benchmark and a decision record, and only the second one is still useful when the question comes back.
+Write it down while the measurements are fresh.
+A week later the reasoning is already reconstructed rather than remembered.

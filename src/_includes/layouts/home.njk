@@ -15,7 +15,7 @@ layout: layouts/base.njk
 
     <div class="hero__ctas">
       {% for section in site.sections %}
-        <a href="{{ site.url }}/{{ section.slug }}/" class="cta-button" style="--section-color: {{ section.color }}">
+        <a href="{{ site.url }}/{{ section.slug }}/" class="cta-button" data-section="{{ section.slug }}">
           <span class="cta-button__icon">{{ icon(section.icon) }}</span>
           <span class="cta-button__text">
             <span class="cta-button__label">{{ section.title }}</span>
@@ -33,19 +33,20 @@ layout: layouts/base.njk
     <p>{{ site.description }} The transition from monolithic spatial databases to a spatial data lakehouse is not a storage migration — it is a fundamental re-architecture of how geospatial data is serialized, versioned, indexed, and queried at scale.</p>
     <p>This site documents the engineering contracts required to make that architecture deliver: deterministic geometry serialization (WKB / GeoParquet), partition strategies that align with real query patterns, predicate pushdown that actually pushes down, and Python orchestration that respects snapshot isolation.</p>
     <p>Every guide is written for {{ site.audience | lower }} who own the pipeline end-to-end — from S3 buckets and catalog manifests to PySpark configurations and CI/CD validation gates. No vendor pitches, no toy examples; just patterns and trade-offs that survive contact with petabyte-scale data.</p>
-    <p>Pick a section below to explore deeper topics, troubleshooting matrices, and ready-to-paste configurations.</p>
+    <p>The catalogue now spans four sections and twenty-five topic areas, from geometry serialization and validation through partitioning, join tuning and streaming ingest to the query engines and the aggregation layer that serves maps and dashboards. Every page carries runnable code, the measurements that justify each recommendation, and the failure modes that make the recommendation necessary.</p>
+    <p>Pick a section below to explore deeper topics, troubleshooting matrices, and ready-to-paste configurations — or start with the deep-dives immediately below, which answer the questions teams ask first.</p>
   </div>
 </section>
 
 <section class="featured container">
   <div class="featured__head">
     <h2 class="section-title">Start here</h2>
-    <p class="featured__lead">The most-referenced engineering deep-dives — battle-tested patterns, troubleshooting matrices, and copy-ready configurations across every section.</p>
+    <p class="featured__lead">Nine deep-dives that answer the questions teams ask first — format and grid comparisons, the layout work that makes queries prune, streaming ingest, and the aggregation patterns behind fast dashboards.</p>
   </div>
   <div class="featured__grid">
-    {% for item in collections.content | deepGuides %}
+    {% for item in collections.content | byUrls(site.featured) %}
       {% set p = site.sections | sectionBySlug(item.data.sectionSlug) %}
-      <article class="featured-card" style="--section-color: {{ p.color if p else site.themeColor }}">
+      <article class="featured-card" data-section="{{ item.data.sectionSlug }}">
         <span class="featured-card__section">
           {% if p %}{{ icon(p.icon) }}{% endif %}
           <a href="{{ site.url }}/{{ item.data.sectionSlug }}/">{{ p.title if p else item.data.sectionSlug }}</a>
@@ -58,12 +59,32 @@ layout: layouts/base.njk
   </div>
 </section>
 
+<section class="latest container">
+  <div class="featured__head">
+    <h2 class="section-title">Newest topic areas</h2>
+    <p class="featured__lead">The most recent additions to the catalogue — geometry quality, platform observability, join tuning, streaming ingest, and the aggregation and tiling layer that serves maps and dashboards.</p>
+  </div>
+  <ul class="latest__grid">
+    {% for item in collections.content | byUrls(site.latestTopics) %}
+      {% set p = site.sections | sectionBySlug(item.data.sectionSlug) %}
+      <li class="latest__card" data-section="{{ item.data.sectionSlug }}">
+        <span class="latest__card-section">
+          {% if p %}{{ icon(p.icon) }}{% endif %}
+          <a href="{{ site.url }}/{{ item.data.sectionSlug }}/">{{ p.title if p else item.data.sectionSlug }}</a>
+        </span>
+        <a class="latest__card-title" href="{{ site.url }}{{ item.url }}">{{ item.data.title }}</a>
+        <p class="latest__card-desc">{{ item.data.description }}</p>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
 <section class="sections container">
   <h2 class="section-title">Explore the sections</h2>
   <div class="sections__grid">
     {% for section in site.sections %}
       {% set topics = collections.content | topicsOf(section.slug) %}
-      <article class="section-card" style="--section-color: {{ section.color }}">
+      <article class="section-card" data-section="{{ section.slug }}">
         <header class="section-card__header">
           <span class="section-card__icon">{{ icon(section.icon) }}</span>
           <h3 class="section-card__title"><a href="{{ site.url }}/{{ section.slug }}/">{{ section.title }}</a></h3>

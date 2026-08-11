@@ -202,6 +202,13 @@ module.exports = function (eleventyConfig) {
     return typeof limit === "number" ? guides.slice(0, limit) : guides;
   });
 
+  // Look pages up by URL, preserving the order of the supplied list.
+  eleventyConfig.addFilter("byUrls", (collection, urls) => {
+    if (!Array.isArray(collection) || !Array.isArray(urls)) return [];
+    const index = new Map(collection.filter((i) => i.url).map((i) => [i.url, i]));
+    return urls.map((u) => index.get(u)).filter(Boolean);
+  });
+
   eleventyConfig.addFilter("sectionBySlug", (sections, slug) => {
     if (!Array.isArray(sections)) return null;
     return sections.find((p) => p.slug === slug) || null;

@@ -5,10 +5,10 @@ The compute plane is where a spatial lakehouse either delivers sub-second geospa
 Because the storage and catalog planes are shared, engine selection is not a lock-in decision the way a monolithic spatial database is. You can run DuckDB for interactive exploration, Trino for federated dashboards, and Sedona for nightly batch joins over the *same* GeoParquet-backed Iceberg tables. The cost of that flexibility is that each engine has its own `ST_*` dialect, its own approach to bounding-box pruning, and its own geometry serialization contract. The rest of this page walks the trade-offs, the mechanics of predicate pushdown per engine, three runnable production patterns, the failure modes that recur across teams, and an operational readiness checklist.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three spatial query engines reading a shared open-table storage and catalog plane">
+<svg viewBox="0 0 732 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three spatial query engines reading a shared open-table storage and catalog plane">
 <title>Decoupled engine-over-open-table compute model</title>
 <desc>DuckDB, Trino, and Apache Sedona on Spark all read the same GeoParquet files registered in Iceberg and Delta Lake tables through a shared catalog that exposes bounding-box statistics for predicate pushdown.</desc>
-<rect x="0" y="0" width="760" height="300" fill="#f7fbfc"/>
+<rect x="0" y="0" width="732" height="300" fill="#f7fbfc"/>
 <text x="380" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#0d3b45" font-weight="bold">Decoupled compute over one open-table storage plane</text>
 <!-- Engine row -->
 <rect x="40" y="46" width="200" height="60" rx="6" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
@@ -260,6 +260,98 @@ enriched.write.format("iceberg").mode("append").save(
 ```
 
 The Sedona block's `/*+ BROADCAST(regions) */` hint is the single most important line: it forces the small polygon side to be shipped to and indexed on every executor, converting what would be a shuffle-heavy join into a local index probe. The KryoSerializer configuration is not optional — Sedona's geometry objects serialize far more compactly through Kryo than through Java serialization, and omitting it inflates shuffle volume and can itself trigger memory failures. The result is written straight back into an Iceberg table, keeping the enriched output on the same open-table storage plane the inputs came from.
+
+## The Cost Model of a Spatial Join
+
+Engine selection arguments usually founder because the participants are comparing different terms of the same equation. A spatial join has four costs, and every engine is fast at some of them and slow at others; naming them separately turns an opinion into a measurement.
+
+<figure class="diagram">
+<svg viewBox="0 0 705 324" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Stacked breakdown of spatial join cost into four components — bytes read, WKB decode, candidate pair generation and exact predicate evaluation — shown for a layout without bounding box pruning and one with it">
+<rect x="0" y="0" width="705" height="324" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Where the time in a spatial join actually goes</text>
+<text x="196" y="60" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">No bbox pruning</text>
+<rect x="106" y="74" width="180" height="46" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="196" y="102" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">bytes read from storage</text>
+<rect x="106" y="120" width="180" height="58" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="196" y="154" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">WKB decode</text>
+<rect x="106" y="178" width="180" height="42" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="196" y="204" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">candidate pairs</text>
+<rect x="106" y="220" width="180" height="62" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="196" y="256" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">exact predicate</text>
+<text x="584" y="60" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">With bbox pruning + broadcast</text>
+<rect x="494" y="238" width="180" height="14" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<rect x="494" y="252" width="180" height="10" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<rect x="494" y="262" width="180" height="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<rect x="494" y="270" width="180" height="12" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="584" y="182" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">same query, same result set,</text>
+<text x="584" y="202" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">roughly one twentieth of the work</text>
+<line x1="286" y1="282" x2="494" y2="282" stroke="#33707d" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="390" y="308" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Engine choice moves one band at a time; layout moves all four at once</text>
+</svg>
+</figure>
+
+**Bytes read** is set by the physical layout, not the engine. Every engine on this page reads Parquet through a similar path, and all of them will read a whole unsorted table if the statistics do not let them skip. This is why an argument about DuckDB against Trino is frequently answering the wrong question: on a badly laid-out table, both are slow, and on a well-laid-out one, both are fast enough that the difference is dominated by concurrency behaviour.
+
+**Decode** is where the engines genuinely differ. Converting WKB bytes into a geometry object is per-row work with poor cache behaviour, and an engine that can evaluate a numeric bounding-box predicate *before* decoding avoids it entirely for the rows that fail. DuckDB and Trino both do this when the predicate is written against materialised bbox columns; none of them can do it when the only filter is a bare `ST_Intersects` over an undecorated geometry column.
+
+**Candidate pair generation** is the join algorithm. A broadcast of a small side with a local tree index produces a candidate set close to the true result size. A shuffle join without spatial partitioning produces a candidate set that grows with the product of both sides, and no amount of downstream optimisation recovers from that. This band is where Sedona's spatial partitioner earns its complexity, and where a naive distributed join loses to a single-node engine by an embarrassing margin.
+
+**Exact predicate evaluation** is the GEOS call itself, and it is roughly constant per candidate pair across engines because most of them use the same underlying library. It matters mainly as a multiplier on the previous band: halving candidate pairs halves this cost exactly.
+
+The practical consequence is an ordering for optimisation work. Fix layout first — partitioning, sort order, bbox columns — because it moves all four bands together. Then fix the join strategy, because it moves the two largest remaining bands. Only then argue about engines, and argue about them with a benchmark rather than a preference, using the methodology in [engine benchmarking and selection](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/).
+
+## Concurrency and Workload Isolation
+
+Single-query benchmarks mislead because production is not single-query. The engine that wins a solo timing run frequently loses under twenty concurrent users, and the reason is architectural rather than incidental.
+
+**DuckDB** is in-process: concurrency means one process per query, and memory is not shared between them. Ten concurrent analytical queries on a 64 GB machine means each gets 6 GB, and a query that needed 20 GB alone now spills. It is superb for a single analyst, a scheduled job, or an embedded serving layer with a bounded query set — and it needs a process manager and admission control to behave under a shared workload.
+
+**Trino** is designed for exactly this problem. Resource groups cap concurrency and memory per queue, so a runaway spatial join in the ad-hoc queue cannot starve the scheduled reporting queue. This governance, rather than raw speed, is the usual reason Trino ends up as the shared SQL surface even in shops whose fastest single-query engine is something else.
+
+**Spark with Sedona** sits between the two: cluster-level isolation is real but coarse, and dynamic allocation makes multi-tenant behaviour hard to reason about. The common pattern — a dedicated cluster per scheduled job, autoscaling within it — is an admission that fine-grained isolation is not its strength.
+
+A workable arrangement for most platforms is therefore layered rather than singular: Trino as the governed interactive surface, Sedona for scheduled heavy transforms, DuckDB embedded in validation jobs and in the API tier for pre-aggregated extracts. They read the same tables, and the isolation boundary sits between workload classes rather than between teams.
+
+Two operational details make the layering hold. First, **admission control needs a spatial-aware timeout**: a query whose bounding box covers the planet should be rejected rather than queued, and that check is cheap to implement as a view or a policy. Second, **cache warmth is a shared resource**: object-storage read caches and manifest caches are per-engine, so a workload that thrashes them degrades everything behind the same engine. Isolating the batch rewrite jobs from the interactive surface protects the caches as much as the CPUs.
+
+
+## Moving a Workload Between Engines
+
+Workloads migrate between engines more often than platforms do, and the migration is usually triggered by a threshold being crossed rather than by a decision being taken. Recognising the thresholds in advance turns an emergency into a scheduled change.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 262" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three thresholds that push a spatial workload from DuckDB to Trino to Sedona: exceeding single-node memory, needing governed multi-user concurrency, and requiring a distributed shuffle join">
+<defs>
+<marker id="eng-move-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6a3d9a"/></marker>
+</defs>
+<rect x="0" y="0" width="766" height="262" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The thresholds that move a workload</text>
+<rect x="26" y="86" width="168" height="86" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="110" y="118" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">DuckDB</text>
+<text x="110" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one process,</text>
+<text x="110" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one workload</text>
+<rect x="306" y="86" width="168" height="86" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="390" y="118" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Trino</text>
+<text x="390" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">many users,</text>
+<text x="390" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">governed queues</text>
+<rect x="586" y="86" width="168" height="86" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="670" y="118" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Sedona</text>
+<text x="670" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">distributed</text>
+<text x="670" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">shuffle joins</text>
+<line x1="194" y1="129" x2="306" y2="129" stroke="#6a3d9a" stroke-width="2" marker-end="url(#eng-move-arrow)"/>
+<line x1="474" y1="129" x2="586" y2="129" stroke="#6a3d9a" stroke-width="2" marker-end="url(#eng-move-arrow)"/>
+<text x="250" y="70" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">concurrency</text>
+<text x="250" y="200" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">&gt; 4 concurrent users, or</text>
+<text x="250" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cross-catalog federation</text>
+<text x="530" y="70" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">shuffle</text>
+<text x="530" y="200" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">large-vs-large join, or</text>
+<text x="530" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">full-table sort rewrite</text>
+<text x="390" y="246" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Moving left is as common as moving right once the layout improves</text>
+</svg>
+</figure>
+
+The rightward moves are familiar. The leftward ones are more interesting and more frequently missed: once a table gains a coherent partition key, a sort order and bounding-box columns, a query that previously demanded a cluster often fits comfortably in a single process. Teams rarely revisit that, and end up paying for distributed compute to run a job whose working set shrank by two orders of magnitude when the layout was fixed. Re-measure after every significant layout change, and be willing to move a workload back.
+
 
 ## Failure modes and operational gotchas
 

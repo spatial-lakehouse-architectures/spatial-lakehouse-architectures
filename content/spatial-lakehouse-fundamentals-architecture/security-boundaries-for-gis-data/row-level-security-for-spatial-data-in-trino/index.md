@@ -141,13 +141,13 @@ WHERE tenant_id = 'acme_east';
 The `count(*)` returning `0` for an explicit cross-tenant probe is the decisive test: the row filter is not a view the user can bypass, it is appended to every access path, including aggregates. For cross-catalog spatial work where the same principle applies to federated sources, see [spatial joins across catalogs with Trino](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/spatial-joins-across-catalogs-with-trino/).
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Trino query flow showing row filter injection before Iceberg partition pruning and spatial evaluation">
+<svg viewBox="0 66 752 126" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Trino query flow showing row filter injection before Iceberg partition pruning and spatial evaluation">
 <title>Row filter injection in the Trino analyzer</title>
 <desc>An analyst query enters the Trino analyzer, the file-based access control appends a tenant equality and an ST_Contains predicate, then the Iceberg connector prunes tenant partitions before geometry evaluation returns only authorized rows.</desc>
 <defs>
 <marker id="arw-trino-rls" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0 L9 4 L0 8 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="66" width="752" height="126" fill="#f7fbfc"/>
 <rect x="20" y="95" width="120" height="60" rx="6" fill="#ffffff" stroke="#cfe3e7"/>
 <text x="80" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#0d3b45">analyst_west</text>
 <text x="80" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">SELECT * FROM assets</text>
@@ -171,3 +171,65 @@ The `count(*)` returning `0` for an explicit cross-tenant probe is the decisive 
 </figure>
 
 Because the filter is bound in the access control layer rather than a view, it survives `JOIN`, `UNION`, and aggregate rewrites, which is the property that distinguishes durable row-level security from a maskable convenience view. For the Databricks equivalent using declarative row filter functions, compare [row-level security in Databricks Unity Catalog for GIS data](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/security-boundaries-for-gis-data/row-level-security-in-databricks-unity-catalog-for-gis/), and consult the [Trino file-based access control reference](https://trino.io/docs/current/security/file-system-access-control.html) for the full rule grammar.
+
+## Where Trino Evaluates the Filter
+
+Trino applies row filters as part of query rewriting, which means the filter expression becomes part of the plan the optimiser sees rather than a post-processing step. That is good news for performance and it puts a specific obligation on how the filter is written.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 248" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Trino row filter path: the access control provider supplies a filter expression, the rewriter injects it into the logical plan, and the optimiser can push a partition predicate into the Iceberg connector but cannot push a geometry function">
+<defs>
+<marker id="trino-rls-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="762" height="248" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">What survives pushdown, and what does not</text>
+<rect x="30" y="62" width="220" height="62" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="140" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">access control provider</text>
+<text x="140" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">returns a filter expression</text>
+<rect x="290" y="62" width="200" height="62" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="390" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">plan rewrite</text>
+<text x="390" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">filter joins the logical plan</text>
+<rect x="530" y="62" width="220" height="62" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="640" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">optimiser</text>
+<text x="640" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">decides what pushes down</text>
+<line x1="250" y1="93" x2="290" y2="93" stroke="#0e6e7d" stroke-width="2" marker-end="url(#trino-rls-arrow)"/>
+<line x1="490" y1="93" x2="530" y2="93" stroke="#0e6e7d" stroke-width="2" marker-end="url(#trino-rls-arrow)"/>
+<rect x="120" y="160" width="280" height="76" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="260" y="186" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#2f6e49">pushes into the connector</text>
+<text x="260" y="208" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">h3_r5 IN (…), tenant_id = …</text>
+<text x="260" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">splits are pruned before reading</text>
+<rect x="420" y="160" width="280" height="76" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="560" y="186" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#9a5a17">stays above the scan</text>
+<text x="560" y="208" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ST_Contains(…), ST_Intersects(…)</text>
+<text x="560" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">every split is read first</text>
+</svg>
+</figure>
+
+The obligation is therefore to write the filter as a conjunction whose first term is a pushdown-friendly predicate. A filter of the form `h3_r5 IN (SELECT cell_id FROM entitlement WHERE principal = current_user) AND ST_Contains(...)` prunes splits on the first term and refines with the second. The same filter with the terms reversed is logically identical and will read the whole table, because the optimiser stops pushing at the first expression it cannot translate.
+
+## Testing the Provider, Not Just the Query
+
+A system access control provider is a plugin, and its behaviour under conditions the happy path never reaches is where the risk lives.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four provider conditions to test: an unknown principal, an empty entitlement set, a provider timeout, and a principal whose entitlement changed mid-session">
+<rect x="0" y="0" width="762" height="232" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Provider behaviour at the edges</text>
+<rect x="30" y="56" width="352" height="76" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">unknown principal</text>
+<text x="206" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">must deny, never default to allow</text>
+<rect x="398" y="56" width="352" height="76" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="574" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">empty entitlement set</text>
+<text x="574" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">must return zero rows, not all rows</text>
+<rect x="30" y="144" width="352" height="76" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="170" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">provider unavailable</text>
+<text x="206" y="194" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">must fail the query, not skip the filter</text>
+<rect x="398" y="144" width="352" height="76" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="170" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">entitlement revoked mid-session</text>
+<text x="574" y="194" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">next query must reflect it</text>
+</svg>
+</figure>
+
+The empty-set case is the classic bug: an `IN ()` construction that collapses to a tautology, or a join that becomes a cross product when the entitlement side is empty. Write the test that asserts a principal with no entitlements sees exactly zero rows, and run it in CI, because this is a failure that only manifests for the newest user on the platform — who is also the least likely to report that they can see too much.
+
+Keep the entitlement lookup itself cheap. If the provider issues a query per request to resolve a principal's cells, that query is on the critical path of every user query, and its latency is added to every session. Cache the resolution with a short time-to-live and invalidate on entitlement change, so the common case costs nothing and a revocation still takes effect promptly.

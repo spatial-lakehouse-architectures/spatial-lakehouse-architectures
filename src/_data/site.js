@@ -10,6 +10,28 @@ module.exports = {
     "Data engineers, platform architects, GIS backend developers, and cloud/infrastructure teams.",
   themeColor: "#0e6e7d",
   backgroundColor: "#f6f3ec",
+  // Hand-picked entry points for the homepage "Start here" grid.
+  featured: [
+    "/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/geoparquet-vs-wkb-column-storage-trade-offs/",
+    "/spatial-lakehouse-fundamentals-architecture/open-table-format-versioning/iceberg-vs-delta-lake-for-spatial-data/",
+    "/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/",
+    "/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/materializing-bbox-columns-for-pushdown/",
+    "/spatial-partitioning-indexing-strategies/spatial-join-optimization/choosing-between-broadcast-and-partitioned-spatial-joins/",
+    "/spatial-query-engines-compute/duckdb-geospatial-analytics/how-to-run-st-intersects-in-duckdb-on-geoparquet/",
+    "/python-ecosystem-integration-workflows/streaming-spatial-ingestion/writing-kafka-geospatial-streams-to-iceberg/",
+    "/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/",
+    "/spatial-query-engines-compute/spatial-aggregation-and-tiling/aggregating-points-to-h3-cells-in-sql/",
+  ],
+
+  // Topic areas added in the latest build, surfaced on the homepage.
+  latestTopics: [
+    "/spatial-lakehouse-fundamentals-architecture/geometry-validation-and-repair/",
+    "/spatial-lakehouse-fundamentals-architecture/spatial-data-observability/",
+    "/spatial-partitioning-indexing-strategies/spatial-join-optimization/",
+    "/python-ecosystem-integration-workflows/streaming-spatial-ingestion/",
+    "/spatial-query-engines-compute/spatial-aggregation-and-tiling/",
+  ],
+
   sections: [
     {
       slug: "spatial-lakehouse-fundamentals-architecture",

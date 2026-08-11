@@ -116,11 +116,11 @@ print("sensor-district pairs:", total_joined)
 ```
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two-stage ST_Intersects join: R-tree bounding-box filter narrows candidates before exact GEOS refinement">
+<svg viewBox="0 0 742 221" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two-stage ST_Intersects join: R-tree bounding-box filter narrows candidates before exact GEOS refinement">
 <defs>
 <marker id="arw-stint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="742" height="221" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">ST_Intersects: bbox filter then exact refine</text>
 <rect x="30" y="70" width="170" height="90" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
 <text x="115" y="100" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#0d3b45">GeoParquet</text>
@@ -141,3 +141,80 @@ print("sensor-district pairs:", total_joined)
 </figure>
 
 The two-stage filter-then-refine pattern shown above is why the R-tree matters so much: the exact GEOS predicate only ever runs on the handful of candidate pairs whose bounding boxes already overlap. To push this further — skipping whole row groups before decode by filtering on a numeric `bbox` covering column — see [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/), and to run the same style of join against an Iceberg table instead of loose GeoParquet, see [querying Iceberg tables with the DuckDB spatial extension](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/querying-iceberg-tables-with-duckdb-spatial-extension/). The canonical function reference is the [DuckDB spatial functions documentation](https://duckdb.org/docs/stable/extensions/spatial/functions).
+
+## Making the Join Faster Still
+
+The R-tree gets the join working; three further steps get it fast, and each is independent of the others.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three additional optimisations for a DuckDB spatial join: filter row groups on numeric bounding box columns before decoding, project only the needed columns, and materialise the small side as a table so the optimiser sees its cardinality">
+<rect x="0" y="0" width="764" height="244" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three cheap steps beyond the index</text>
+<rect x="26" y="56" width="230" height="176" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">1. bbox pre-filter</text>
+<text x="141" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">numeric columns in the file</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">skips whole row groups</text>
+<text x="141" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">before any WKB is decoded</text>
+<text x="141" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">largest effect of the three</text>
+<rect x="274" y="56" width="230" height="176" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">2. project narrowly</text>
+<text x="389" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">name the columns you need</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">SELECT * reads every</text>
+<text x="389" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">attribute column too</text>
+<text x="389" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">free, and often forgotten</text>
+<rect x="522" y="56" width="230" height="176" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">3. materialise the small side</text>
+<text x="637" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">CREATE TABLE, not a view</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">the optimiser then knows</text>
+<text x="637" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">its true cardinality</text>
+<text x="637" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">changes the build side</text>
+</svg>
+</figure>
+
+The bounding-box pre-filter is worth applying even with the R-tree in place, because the two operate at different stages: the numeric predicate eliminates row groups during the Parquet read, before any geometry exists in memory, while the R-tree eliminates candidate pairs after the rows have been materialised. Doing both means the index is only ever asked about rows that survived the file-level prune.
+
+## Verifying Correctness, Not Just Speed
+
+<figure class="diagram">
+<svg viewBox="0 0 764 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three correctness checks for a spatial join: boundary cases where geometries touch, points falling in multiple polygons, and rows with null or empty geometry">
+<rect x="0" y="0" width="764" height="210" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three cases the happy path never exercises</text>
+<rect x="26" y="58" width="230" height="140" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">touching boundaries</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a point exactly on an edge</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ST_Intersects says yes</text>
+<text x="141" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ST_Contains says no</text>
+<rect x="274" y="58" width="230" height="140" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">multiple matches</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">overlapping polygons</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">counts exceed the input</text>
+<text x="389" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">decide: expected or a bug?</text>
+<rect x="522" y="58" width="230" height="140" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">null and empty</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">missing geometry rows</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">silently dropped by the join</text>
+<text x="637" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">count them separately</text>
+</svg>
+</figure>
+
+The right-hand case is the one that produces quiet undercounts. Rows with null geometry never satisfy any spatial predicate, so an inner join drops them without comment and a total that should have been complete is short by however many there were. Counting them before the join, and deciding explicitly whether they belong in the output, turns a silent loss into a stated one.
+
+## Scaling the Same Recipe
+
+The recipe above holds up well past the scale most people expect, and the two adjustments that extend it further are both about avoiding materialisation.
+
+The first is to **skip the intermediate tables** when the source is already well laid out. `CREATE TABLE ... AS SELECT` reads and stores everything before the join begins; querying `read_parquet` directly in the join lets DuckDB push the bounding-box predicate into the Parquet reader and never materialise the rows it will discard. The intermediate table is worth creating only for the small side, where the optimiser benefits from knowing the cardinality.
+
+The second is to **stream the output** rather than collecting it. `fetchall` builds the entire result in Python memory, which is fine for an aggregate and wasteful for a join that returns millions of rows. Writing the result straight to Parquet with `COPY ... TO` keeps peak memory flat and produces an output that the rest of the pipeline can read without a further conversion.
+
+Beyond that, the boundary is the one described in the section overview: when the join's working set exceeds the node, the recipe stops applying and the workload belongs on a cluster. Everything up to that point — and it is a lot of data — runs comfortably in a single process with no infrastructure at all, which is the reason this pattern is worth having in the toolkit even on platforms whose default answer is distributed compute.
+
+For reading a governed table rather than loose files, and for the predicate split that keeps the table planner involved, see [querying Iceberg tables with the DuckDB spatial extension](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/querying-iceberg-tables-with-duckdb-spatial-extension/).
+That guide picks up exactly where this one leaves off, with the same two-stage predicate structure applied across the table boundary.
+The layout guidance that makes the bounding-box columns available in the first place is in [spatial partitioning and indexing strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/).
+Without those columns, the R-tree is doing all the work alone and the file-level prune never happens.
+
+The two mechanisms compose, and a table that supports both will answer this query in a fraction of the time either alone would achieve.
+Check both in the plan before concluding the query is as fast as it can be.
+A plan that shows one but not the other has headroom left in it.
+ Both mechanisms are cheap to add and neither is enabled by default.

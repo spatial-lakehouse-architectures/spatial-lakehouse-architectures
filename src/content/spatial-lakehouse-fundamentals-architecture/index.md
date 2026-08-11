@@ -3,11 +3,11 @@
 The transition from monolithic spatial databases to a spatial data lakehouse is not a storage migration; it is a fundamental re-architecture of how geospatial data is serialized, versioned, indexed, and queried at scale. Traditional GIS stacks tightly couple storage, compute, and spatial indexing into a single RDBMS process, creating hard ceilings on concurrency, storage elasticity, and multi-engine interoperability. A spatial lakehouse decouples these planes, anchoring immutable data in cloud object storage while delegating transactional control to open table formats and pushing spatial compute to distributed query engines.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three decoupled planes of a spatial lakehouse: object storage of GeoParquet and WKB files, the table format and catalog holding metadata, snapshots and bbox stats, and the compute engines Spark, Trino and DuckDB">
+<svg viewBox="0 0 751 228" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three decoupled planes of a spatial lakehouse: object storage of GeoParquet and WKB files, the table format and catalog holding metadata, snapshots and bbox stats, and the compute engines Spark, Trino and DuckDB">
 <defs>
 <marker id="fund-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="230" fill="#f7fbfc"/>
+<rect x="0" y="0" width="751" height="228" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Decoupled spatial lakehouse stack</text>
 <rect x="20" y="55" width="205" height="130" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
 <text x="122" y="80" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">Object storage</text>
@@ -44,6 +44,65 @@ A production spatial lakehouse operates across three isolated planes:
 1. **Immutable Object Storage Plane**: Cloud storage (S3, ADLS, GCS) acts as the single source of truth. Data is persisted in columnar formats optimized for analytical I/O. Target file sizes of 128MB–1GB balance metadata overhead against parallel read throughput. Over-partitioning spatial datasets into thousands of sub-10MB files degrades query performance due to excessive listing and metadata resolution.
 2. **Transactional Catalog Layer**: The catalog maintains schema definitions, transaction logs, and snapshot pointers. It enforces ACID guarantees without locking the underlying storage layer. Engines attach to the catalog to resolve table states, enabling concurrent reads and writes without data corruption.
 3. **Distributed Compute Plane**: Query engines (Spark, Trino, DuckDB, Databricks, Snowflake) attach to the catalog, execute spatial predicates, and materialize results. Compute is stateless and horizontally scalable. Spatial operations are pushed down to the storage layer where possible, leveraging file-level statistics to skip irrelevant data blocks.
+
+## Reference Architecture: From Ingestion to Serving
+
+The three planes describe *what* the pieces are; a working platform also needs a defined order in which data moves through them. Almost every production spatial lakehouse converges on the same six-stage path, and most incidents can be traced to a stage that was skipped or implemented as an afterthought.
+
+<figure class="diagram">
+<svg viewBox="0 0 774 298" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six-stage spatial ingestion pipeline: raw sources land, geometry is validated and repaired, CRS is normalised to 4326, WKB and bounding box columns are derived, data is committed to the table format, and maintenance jobs compact and sort before engines serve queries">
+<defs>
+<marker id="fund-pipe-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="774" height="298" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The six stages every spatial write passes through</text>
+<rect x="18" y="58" width="138" height="76" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="87" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">1. Land</text>
+<text x="87" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">Shapefile, GeoJSON,</text>
+<text x="87" y="119" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">PostGIS dump, Kafka</text>
+<rect x="174" y="58" width="138" height="76" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="243" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">2. Validate</text>
+<text x="243" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">ST_IsValid, repair</text>
+<text x="243" y="119" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">self-intersections</text>
+<rect x="330" y="58" width="138" height="76" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="399" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">3. Normalise CRS</text>
+<text x="399" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">reproject to 4326</text>
+<text x="399" y="119" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">record source SRID</text>
+<rect x="486" y="58" width="138" height="76" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="555" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">4. Derive</text>
+<text x="555" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">WKB + bbox cols</text>
+<text x="555" y="119" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">+ grid cell id</text>
+<rect x="642" y="58" width="120" height="76" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="702" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">5. Commit</text>
+<text x="702" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">snapshot written</text>
+<text x="702" y="119" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">to the catalog</text>
+<line x1="156" y1="96" x2="174" y2="96" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<line x1="312" y1="96" x2="330" y2="96" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<line x1="468" y1="96" x2="486" y2="96" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<line x1="624" y1="96" x2="642" y2="96" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<rect x="174" y="182" width="288" height="70" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="318" y="208" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">6. Maintain (asynchronous)</text>
+<text x="318" y="228" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">compaction, sort rewrite, snapshot expiry</text>
+<text x="318" y="243" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">runs on its own schedule, never in the write path</text>
+<rect x="500" y="182" width="262" height="70" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="631" y="208" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Serving</text>
+<text x="631" y="228" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">Sedona, Trino and DuckDB read the</text>
+<text x="631" y="243" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">same committed snapshot</text>
+<line x1="702" y1="134" x2="702" y2="182" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<line x1="399" y1="134" x2="399" y2="182" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<line x1="462" y1="217" x2="500" y2="217" stroke="#0e6e7d" stroke-width="2" marker-end="url(#fund-pipe-arrow)"/>
+<text x="390" y="282" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Stages 2–4 are the contract: skip any of them and the cost surfaces later as a query-time full scan</text>
+</svg>
+</figure>
+
+Stages two through four are where the architecture is actually decided. **Validation** must happen before the write, because an invalid polygon — a self-intersecting ring, a bowtie, a hole outside its shell — will not fail loudly; it will silently return the wrong answer from `ST_Intersects` months later, in one partition, for one customer. Running `ST_IsValid` and `ST_MakeValid` at ingest costs single-digit milliseconds per feature and removes an entire class of unreproducible bug reports.
+
+**CRS normalisation** is the second contract. A lakehouse table has exactly one coordinate reference system, and every engine that touches it assumes that system without asking. Storing a mix of 4326 and 3857 geometries in one column produces joins that return zero rows with no error at all, because coordinate values in degrees never intersect coordinate values in metres. The discipline described in [CRS management pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/) — reproject at the boundary, record the source SRID in a sidecar column, and assert the invariant in CI — is what keeps that from happening.
+
+**Derivation** is the cheapest performance work available. Computing four `double` bounding-box columns and a grid cell identifier at write time costs a few percent of ingest throughput and unlocks file-level skipping for every reader afterwards, in every engine, without any of them needing to understand geometry at all. A query planner that can compare `bbox_max_x` against a constant will prune 95% of the files in a well-sorted table; a planner that must decode WKB to make the same decision has already paid for the read.
+
+Stage six deserves particular attention because it is the stage teams most often leave out of the design and later bolt on under pressure. Compaction, sort rewriting and snapshot expiry are not optional housekeeping — they are the mechanism by which a streaming spatial table stays queryable. Ingesting 5 million points an hour in one-minute micro-batches produces 1,440 files a day per partition, and the metadata cost of planning across them will eventually exceed the cost of reading them. Treat maintenance as a first-class scheduled workload, described in [lakehouse maintenance automation](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/), and give it its own compute budget.
+
 
 ## Geometry Serialization & Engine Interoperability
 
@@ -132,6 +191,56 @@ jobs:
         run: python scripts/validate_spatial_schema.py
 ```
 
+## Migrating From PostGIS Without a Big Bang
+
+Most teams arriving at a spatial lakehouse already run PostGIS, and the migration question is rarely "can it work" but "how do we get there without a freeze". A cutover in one step fails for a predictable reason: the lakehouse cannot serve the low-latency single-feature lookups that the existing application tier depends on, so the moment the database is switched off, unrelated services break. The workable pattern keeps both systems live and moves *workloads*, not tables.
+
+<figure class="diagram">
+<svg viewBox="0 0 782 264" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four-phase PostGIS to lakehouse migration timeline: mirror analytical extracts, dual-write with reconciliation, shift analytical reads to the lakehouse, and finally retain PostGIS only for transactional feature serving">
+<rect x="0" y="0" width="782" height="264" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Moving workloads, not tables</text>
+<line x1="40" y1="88" x2="740" y2="88" stroke="#cfe3e7" stroke-width="6" stroke-linecap="round"/>
+<circle cx="110" cy="88" r="11" fill="#2f6e49"/>
+<circle cx="303" cy="88" r="11" fill="#0e6e7d"/>
+<circle cx="497" cy="88" r="11" fill="#0e6e7d"/>
+<circle cx="690" cy="88" r="11" fill="#6a3d9a"/>
+<text x="110" y="66" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#2f6e49">Phase 1</text>
+<text x="303" y="66" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0e6e7d">Phase 2</text>
+<text x="497" y="66" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0e6e7d">Phase 3</text>
+<text x="690" y="66" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#6a3d9a">Phase 4</text>
+<rect x="30" y="112" width="160" height="104" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="110" y="136" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">Mirror</text>
+<text x="110" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">nightly extract to</text>
+<text x="110" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">GeoParquet, read-only</text>
+<text x="110" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">risk: none</text>
+<rect x="223" y="112" width="160" height="104" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="303" y="136" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">Dual-write</text>
+<text x="303" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">both systems written,</text>
+<text x="303" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">counts reconciled daily</text>
+<text x="303" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">risk: write divergence</text>
+<rect x="417" y="112" width="160" height="104" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="497" y="136" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">Shift reads</text>
+<text x="497" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">analytics and BI move</text>
+<text x="497" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">to the lakehouse</text>
+<text x="497" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">risk: result drift</text>
+<rect x="610" y="112" width="160" height="104" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="690" y="136" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">Specialise</text>
+<text x="690" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">PostGIS keeps OLTP</text>
+<text x="690" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">feature serving only</text>
+<text x="690" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">risk: two schemas</text>
+<text x="390" y="248" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Each phase is independently reversible; nothing is deleted until phase 4 has run unattended for a quarter</text>
+</svg>
+</figure>
+
+**Phase one** is a one-way mirror. A nightly job exports the PostGIS tables to GeoParquet and registers them as a lakehouse table. Nothing depends on it, so nothing can break, and the team gets a real dataset against which to benchmark engines and validate that geometry round-trips byte-for-byte. Compare `ST_AsBinary` output hashes between source and target rather than comparing row counts; a truncated coordinate precision setting will preserve the count and corrupt every geometry.
+
+**Phase two** introduces dual-write. The ingestion service writes to PostGIS as before and appends to the lakehouse table in the same logical transaction boundary — accepting that the two systems have no shared transaction. Reconciliation is therefore mandatory: a daily job that compares row counts, geometry hash aggregates and bounding-box extents per partition, and alerts on divergence beyond a threshold. Most teams discover here that their PostGIS writes include updates and deletes they had forgotten about, which is exactly the discovery this phase exists to force.
+
+**Phase three** moves the analytical read workloads — dashboards, batch scoring, tile pre-generation, spatial aggregation reports — onto the lakehouse. Run both for a period and diff the outputs. Expect small, explainable differences: PostGIS and GEOS-backed engines can disagree at the boundary of `ST_Intersects` for geometries that merely touch, and floating-point reprojection is not associative. Differences that are not explainable are bugs, usually in CRS handling.
+
+**Phase four** is the steady state, and for most organisations it is not "PostGIS is gone". It is PostGIS serving the transactional single-feature reads and edits it is genuinely excellent at, against a much smaller working set, while the lakehouse owns history, scale and multi-engine analytics. The cost saving comes from the database no longer needing to hold five years of telemetry to answer a question about last Tuesday.
+
+
 ## Security, Governance & Access Control
 
 Geospatial datasets frequently contain sensitive infrastructure coordinates, proprietary survey boundaries, or regulated environmental data. Implementing [Security Boundaries for GIS Data](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/security-boundaries-for-gis-data/) requires enforcing row-level security (RLS) based on spatial containment, column-level masking for coordinate precision, and IAM policies that restrict catalog access to authorized compute clusters.
@@ -146,6 +255,48 @@ Cross-cloud spatial joins introduce latency penalties due to egress costs and ne
 - Pre-materializing spatial indexes in the target cloud
 - Using Delta Sharing or Iceberg REST Catalog for metadata-only federation
 - Restricting cross-cloud queries to aggregated results rather than raw geometry transfers
+
+## Failure Modes and Operational Gotchas
+
+Spatial lakehouse incidents cluster into a small number of recurring shapes. Each of the following has a cheap detection and a known mitigation; the expensive part is always discovering it in production rather than in CI.
+
+- **Small-file explosion.** Streaming ingest at high frequency produces thousands of files per partition, and query planning time grows with file count long before scan time does. *Detect:* track files-per-partition and mean file size as a metric, alerting under 32 MB. *Mitigate:* schedule `rewrite_data_files` (Iceberg) or `OPTIMIZE` (Delta) with a target of 128 MB–1 GB, and consider buffering micro-batches to a five-minute commit interval instead of one.
+- **Manifest bloat.** Every commit appends manifest metadata. A table with a year of minute-level snapshots can spend more time resolving its own metadata than reading data. *Detect:* time `SELECT count(*)` against an empty predicate — if planning dominates, the metadata is the problem. *Mitigate:* expire snapshots on a retention policy, and run manifest rewrite so the manifest list stays proportional to live data, not to write history.
+- **CRS drift.** An upstream provider changes its export projection without announcing it, and the new files land in a table whose other files are in 4326. Joins quietly return nothing. *Detect:* assert coordinate ranges at ingest — latitudes outside ±90 are a projected CRS masquerading as geographic. *Mitigate:* the drift detection covered in [detecting CRS drift in ingestion pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/).
+- **Bounding-box statistics that do not exist.** Data skipping depends on per-file min/max statistics, and Parquet writers only collect them for the first N columns by default (32 in many implementations). A geometry-adjacent bbox column placed at position 40 in a wide schema gets no statistics and no skipping. *Detect:* read the Parquet footer and confirm statistics are present for the bbox columns. *Mitigate:* raise the statistics column limit or move the bbox columns to the front of the schema.
+- **The antimeridian and the poles.** A bounding box around a geometry that crosses ±180° longitude spans the entire globe, so every file appears to match every query. A handful of shipping-route or flight-path polygons can therefore defeat skipping for an entire table. *Detect:* flag any file whose bbox width exceeds 180°. *Mitigate:* split crossing geometries at the antimeridian at ingest, or store a pair of bounding boxes.
+- **Write amplification on wide polygons.** Copy-on-write updates rewrite whole files. When a file contains multi-megabyte administrative boundaries, a single-row correction can rewrite hundreds of megabytes. *Detect:* monitor bytes-written against rows-changed. *Mitigate:* choose merge-on-read for tables that receive scattered updates, and keep large-geometry tables physically separate from high-churn attribute tables.
+- **Concurrent maintenance versus concurrent writes.** A compaction job and a streaming writer targeting the same partition will race, and the loser retries — repeatedly, if the compaction is long. *Detect:* count commit conflicts. *Mitigate:* partition-scope the maintenance job, run it against partitions that are no longer receiving writes, and cap its runtime.
+- **Geometry that is valid but pathological.** A polygon with 400,000 vertices is valid, passes every check, and will make a distributed join hang on one straggler task. *Detect:* record vertex counts as a column at ingest and alert on outliers. *Mitigate:* simplify for analytical layers with a tolerance appropriate to the query resolution, retaining the exact geometry in a reference table.
+
+
+## What Actually Drives the Bill
+
+Cost conversations about lakehouses usually start with storage, which is almost never the expensive part. A petabyte of GeoParquet at standard object-storage rates is a rounding error next to the compute that scans it badly. Four factors dominate, and all four are architectural rather than commercial.
+
+**Bytes scanned per query.** This is the single largest lever, and it is set by partitioning and sort order rather than by engine choice. A table with a coherent grid partition and coordinate-sorted files answers a metropolitan-area query by reading 0.5% of its bytes; the same data written in arrival order reads all of it. Every guide under [spatial partitioning and indexing strategies](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/) is ultimately about this number.
+
+**Geometry decode CPU.** Decoding WKB to an in-memory geometry is not free, and an engine that decodes before filtering pays it on every row rather than on the survivors. Numeric bounding-box predicates that run before any decode routinely cut CPU by an order of magnitude — which is why [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/) matters more for spatial workloads than for scalar ones.
+
+**Request count against object storage.** Listing and `GET` requests are billed per operation, and a small-file problem inflates them dramatically. Ten thousand 1 MB files cost far more in requests than eighty 128 MB files holding the same data, and the difference shows up on the storage invoice rather than the compute one, which is why it is often missed.
+
+**Idle and oversized compute.** Spatial joins tempt teams into large clusters that then sit idle between batches. A broadcast join against a small boundary table on modest hardware frequently outperforms a shuffle join on hardware three times the size; the guidance in [broadcast spatial joins with Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/broadcast-spatial-joins-with-apache-sedona/) is as much a cost technique as a performance one. Size for the join strategy, not for the raw data volume.
+
+A useful discipline is to attach a cost annotation to every scheduled spatial job — bytes scanned, files touched, wall-clock and vCPU-hours — and review the top ten monthly. In most platforms, three jobs account for two-thirds of the spend, and at least one of them is scanning a table that nobody has partitioned since it was created.
+
+
+## When a Spatial Lakehouse Is the Wrong Answer
+
+The architecture has a shape, and workloads that do not fit that shape are better served elsewhere. Being explicit about this early prevents a migration that succeeds technically and fails operationally.
+
+Object storage has a floor on latency measured in tens of milliseconds, and the table format adds a metadata resolution step on top. That makes the lakehouse a poor fit for **single-feature transactional lookups** — "fetch parcel 88213 and return it to the map client in 40 ms" — where PostGIS with a GiST index is not merely adequate but genuinely better by an order of magnitude. It is equally a poor fit for **interactive editing**, where a user drags a vertex and expects the change to be visible to a colleague immediately: snapshot isolation is the wrong concurrency model for collaborative editing, and file rewrite costs make per-vertex updates absurd.
+
+**Small datasets do not justify the machinery.** A 20 GB set of administrative boundaries that changes quarterly does not need snapshots, manifests, compaction schedules or a catalog service. GeoPackage on a disk, or a single Parquet file read by DuckDB, will answer every question faster and with a fraction of the operational surface. The lakehouse earns its complexity somewhere above the point where one machine can no longer hold the working set, or where more than one engine must read the same governed copy.
+
+Finally, **raster-dominant workloads** sit awkwardly. Open table formats model rows, and a raster is a tiled array; forcing it into a row-per-tile table works, but Zarr or Cloud-Optimised GeoTIFF with a spatial catalogue on top is the more natural fit. The hybrid pattern in [bucket mapping for raster data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/bucket-mapping-for-raster-data/) — keep pixels in their native format, keep footprints and metadata in the lakehouse — usually beats either extreme.
+
+The honest test is workload-shaped rather than size-shaped: if the dominant access pattern is analytical scans over large extents, versioned history matters, and more than one compute engine needs the same governed copy, the lakehouse is right. If the dominant pattern is point lookups and edits under a latency budget, it is not.
+
 
 ## Operational Readiness Checklist
 

@@ -7,7 +7,16 @@
   <title>{% if headTitle and page.url != "/" %}{{ headTitle }} · {{ site.shortName }}{% else %}{{ site.name }}{% endif %}</title>
   <meta name="description" content="{{ description or site.description }}">
   <meta name="theme-color" content="{{ site.themeColor }}">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    /* Apply a stored theme before first paint; with no stored choice the OS preference wins. */
+    (function () {
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   {% if noindex %}<meta name="robots" content="noindex,nofollow">{% else %}<meta name="robots" content="index,follow">{% endif %}
   <link rel="canonical" href="{{ page.url | absoluteUrl }}">
 

@@ -133,6 +133,61 @@ def test_geoparquet_metadata_is_valid(path):
     assert not failures, "\n".join(failures)
 ```
 
+## Which Checks Belong in CI and Which Belong in the Pipeline
+
+Not every validation belongs in a pull request. Splitting them by what they can actually see keeps the build fast and keeps the production check meaningful.
+
+<figure class="diagram">
+<svg viewBox="0 0 758 238" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two validation stages: pull request checks that read a small fixture file and verify metadata shape, and pipeline checks that run against every written file and verify statistics, extent and row counts">
+<rect x="0" y="0" width="758" height="238" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two stages, two different questions</text>
+<rect x="34" y="58" width="330" height="168" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="199" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">pull request (fixture)</text>
+<text x="199" y="110" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">does the writer emit &#8220;geo&#8221; at all?</text>
+<text x="199" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">version inside the supported range</text>
+<text x="199" y="154" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">primary_column matches the schema</text>
+<text x="199" y="176" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">CRS present and non-empty</text>
+<text x="199" y="204" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">runs in under a second</text>
+<rect x="416" y="58" width="330" height="168" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="581" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">pipeline (real data)</text>
+<text x="581" y="110" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">statistics present on bbox columns</text>
+<text x="581" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">declared bbox matches actual extent</text>
+<text x="581" y="154" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry_types matches what is stored</text>
+<text x="581" y="176" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">row count non-zero per partition</text>
+<text x="581" y="204" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">runs on every write</text>
+</svg>
+</figure>
+
+The left-hand checks answer "did we configure the writer correctly", and a tiny fixture answers that as well as a terabyte would. The right-hand checks answer "did this particular write behave", and they cannot be moved left because a fixture cannot exhibit a real extent or a real statistics limit. Teams that put everything in CI end up with a slow build that still misses production defects; teams that put everything in the pipeline discover configuration errors after the data is written.
+
+## Failing Loudly Without Blocking Delivery
+
+A metadata gate that halts an hourly load because one file is imperfect will be switched off. Grade the responses instead.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 198" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three responses to a metadata validation failure: block the promotion for a missing or wrong contract, warn and continue for a cosmetic mismatch, and record a metric for drift that is not yet actionable">
+<rect x="0" y="0" width="764" height="198" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Grade the response to the defect</text>
+<rect x="26" y="60" width="230" height="126" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="141" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">block</text>
+<text x="141" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">no geo metadata</text>
+<text x="141" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">CRS absent or wrong</text>
+<text x="141" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">encoding not WKB</text>
+<rect x="274" y="60" width="230" height="126" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0e6e7d">warn</text>
+<text x="389" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">bbox absent from geo block</text>
+<text x="389" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry_types over-broad</text>
+<text x="389" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">spec version newer than pinned</text>
+<rect x="522" y="60" width="230" height="126" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="637" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">record</text>
+<text x="637" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">file size distribution</text>
+<text x="637" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">statistics coverage ratio</text>
+<text x="637" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">writer library version</text>
+</svg>
+</figure>
+
+The blocking set should be small enough that a failure is unambiguous and always worth a human's attention. Everything else accumulates as a metric, and the metric is what tells you whether a warning is a one-off or a trend — which is the only basis on which a warning should ever be promoted to a block.
+
 ## Common errors and fixes
 
 | Error | Cause | Fix |
@@ -168,13 +223,13 @@ print("gate distinguishes conforming from non-conforming files")
 ## CI gate flow
 
 <figure class="diagram">
-<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Continuous integration flow validating GeoParquet metadata: pull request triggers a footer read, four metadata assertions gate the result into promote or block">
+<svg viewBox="0 0 656 212" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Continuous integration flow validating GeoParquet metadata: pull request triggers a footer read, four metadata assertions gate the result into promote or block">
 <title>GeoParquet metadata CI gate</title>
 <desc>A pull request triggers a footer-only metadata read, which feeds four assertions — version, primary_column, CRS present, bbox covering — and a passing result promotes the file while any failure blocks the merge.</desc>
 <defs>
 <marker id="arw-ci" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="210" fill="#f7fbfc"/>
+<rect x="0" y="0" width="656" height="212" fill="#f7fbfc"/>
 <rect x="16" y="78" width="120" height="54" rx="6" fill="#ffffff" stroke="#0e6e7d"/>
 <text x="76" y="102" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">Pull request</text>
 <text x="76" y="120" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">.parquet changed</text>
@@ -198,8 +253,16 @@ print("gate distinguishes conforming from non-conforming files")
 <line x1="300" y1="105" x2="332" y2="115" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-ci)"/>
 <line x1="484" y1="70" x2="522" y2="70" stroke="#2f6e49" stroke-width="2" marker-end="url(#arw-ci)"/>
 <line x1="484" y1="150" x2="522" y2="145" stroke="#9a5a17" stroke-width="2" marker-end="url(#arw-ci)"/>
-<text x="504" y="112" text-anchor="middle" font-family="sans-serif" font-size="10.5" fill="#33707d">all pass / any fail</text>
+<text x="504" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">all pass / any fail</text>
 </svg>
 </figure>
 
 Wiring this gate into promotion closes the loop opened by the [GeoParquet encoding standards](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/) topic area within the [Spatial Lakehouse Fundamentals & Architecture](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/) section, and it pairs naturally with the schema checks around [Iceberg spatial type support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/). Keep the assertions aligned with the field names in the [GeoParquet specification](https://geoparquet.org/releases/v1.1.0/) and the CRS model in the [OGC Simple Features Access](https://www.ogc.org/standard/sfa/) standard so the gate stays correct as the spec evolves.
+
+## Extending the Gate to a Whole Catalogue
+
+The same validation function that guards one file is more valuable pointed at everything. Run it as a weekly sweep over every spatial table's most recent files, and publish the result as a short table of contract violations ordered by data volume behind each. The output tends to be dominated by tables nobody has touched in a year, written by a pipeline that predates the convention — which is exactly the set that will surprise someone during an incident. Fixing them is usually a rewrite of the most recent partition plus a table-property change, and doing it proactively converts an unknown risk into a scheduled afternoon. Pair the sweep with the table-level audit described in [Iceberg spatial type support](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/iceberg-spatial-type-support/) so file-level and catalog-level contracts are checked by the same job and reported together.
+
+Treat the gate as permanent infrastructure rather than as a migration aid. Metadata regressions do not arrive once and get fixed; they arrive whenever a dependency is upgraded, a pipeline is rewritten by someone new, or a table is recreated during an incident under time pressure. A check that runs on every write costs nothing on the days it passes, and on the day it fires it saves a rewrite of everything downstream.
+
+The measure of a good gate is that nobody talks about it. It should be fast enough that nobody proposes skipping it, precise enough that a failure is never argued with, and quiet enough that a green build carries no information. Everything else — the trend metrics, the catalogue sweep, the warnings — belongs on a dashboard that somebody reviews deliberately rather than in the path of a deployment.

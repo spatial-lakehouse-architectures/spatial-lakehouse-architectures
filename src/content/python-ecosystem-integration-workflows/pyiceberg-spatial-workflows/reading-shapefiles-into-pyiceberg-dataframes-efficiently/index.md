@@ -146,3 +146,99 @@ These settings integrate seamlessly with broader [Python Ecosystem & Integration
 **Resolution**: Pre-validate with `pyogrio.open_arrow(..., skip_invalid=True)` where supported, or wrap `shapely.wkb.dumps()` in a `try/except` and log malformed record indices for manual QA. Iceberg does not perform runtime geometry validation; enforce it upstream.
 
 For authoritative reference on Arrow geometry interoperability and WKB specification compliance, consult the [Pyogrio Documentation](https://pyogrio.readthedocs.io/en/latest/) and the [Apache Iceberg Python API Reference](https://py.iceberg.apache.org/). Implementing this pipeline guarantees deterministic memory bounds, snapshot-safe commits, and direct compatibility with downstream spatial query engines.
+
+## Why Shapefiles Resist Efficient Reading
+
+The format's constraints are the reason a naive read is slow, and each one has a specific workaround.
+
+<figure class="diagram">
+<svg viewBox="0 0 774 284" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four shapefile constraints and their workarounds: multiple sidecar files that must all be present, field names truncated to ten characters, no null distinction for numeric fields, and an encoding that is often undeclared">
+<rect x="0" y="0" width="774" height="284" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Four constraints, four workarounds</text>
+<rect x="30" y="56" width="352" height="100" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">several sidecar files</text>
+<text x="206" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">.shp .shx .dbf .prj .cpg</text>
+<text x="206" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">fetch all of them; a missing .prj means an unknown CRS</text>
+<rect x="398" y="56" width="352" height="100" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="574" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">10-character field names</text>
+<text x="574" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">&#8220;population_2024&#8221; becomes &#8220;populati_1&#8221;</text>
+<text x="574" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">map to real names explicitly at ingest</text>
+<rect x="30" y="172" width="352" height="100" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="200" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">no true nulls</text>
+<text x="206" y="224" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">missing numerics arrive as 0 or -9999</text>
+<text x="206" y="248" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">declare the sentinel and convert it</text>
+<rect x="398" y="172" width="352" height="100" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="200" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">undeclared text encoding</text>
+<text x="574" y="224" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">.cpg is optional and often absent</text>
+<text x="574" y="248" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">specify it; do not let the reader guess</text>
+</svg>
+</figure>
+
+The sentinel-value problem is the one that most often survives into the lakehouse. A population column where missing values are recorded as zero produces sums and averages that are wrong by an amount nobody can detect from the output, and the fix — declaring the sentinel per column at ingest and converting to null — takes one line and must be done at the boundary, because once the value is in the table it is indistinguishable from a real zero.
+
+## Reading Efficiently Rather Than Simply
+
+<figure class="diagram">
+<svg viewBox="0 0 762 222" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comparison of a naive shapefile read that loads the whole file into a GeoDataFrame against a streaming read that yields batches and converts to Arrow incrementally">
+<rect x="0" y="0" width="762" height="222" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The read strategy decides peak memory</text>
+<rect x="30" y="58" width="352" height="152" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">read whole file</text>
+<text x="206" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one GeoDataFrame in memory</text>
+<text x="206" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">shapely objects per feature</text>
+<text x="206" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">peak &#8776; 4–8× the file size</text>
+<text x="206" y="190" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">fails on large national datasets</text>
+<rect x="398" y="58" width="352" height="152" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="574" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">stream in batches</text>
+<text x="574" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">read N features, convert, release</text>
+<text x="574" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">WKB encoded per batch</text>
+<text x="574" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">peak &#8776; one batch</text>
+<text x="574" y="190" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">flat memory, any file size</text>
+</svg>
+</figure>
+
+The four-to-eight-times multiplier on the left is not an exaggeration: a shapefile's geometry is a compact binary record, and a shapely object graph for the same feature is substantially larger, with Python object overhead on every ring and every coordinate array. Streaming avoids constructing more than one batch of them at a time and makes the memory profile independent of the input size, which is what allows the same code to handle a municipal extract and a continental one.
+
+## Normalising on the Way In
+
+<figure class="diagram">
+<svg viewBox="0 0 768 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Normalisation steps applied to each streamed batch before writing: rename truncated fields, convert sentinel values to null, reproject to the canonical CRS, force two dimensions, encode WKB and derive bounding box columns">
+<defs>
+<marker id="shp-norm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2f6e49"/></marker>
+</defs>
+<rect x="0" y="0" width="768" height="232" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Everything that must happen before the write</text>
+<rect x="24" y="66" width="140" height="66" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="94" y="94" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">rename fields</text>
+<text x="94" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">from the mapping</text>
+<rect x="184" y="66" width="140" height="66" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="254" y="94" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">sentinels to null</text>
+<text x="254" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">per declared column</text>
+<rect x="344" y="66" width="140" height="66" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="414" y="94" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">reproject</text>
+<text x="414" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">from the .prj</text>
+<rect x="504" y="66" width="132" height="66" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="570" y="94" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">force 2D</text>
+<text x="570" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">drop Z and M</text>
+<rect x="656" y="66" width="100" height="66" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="706" y="94" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">encode</text>
+<text x="706" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">WKB + bbox</text>
+<line x1="164" y1="99" x2="184" y2="99" stroke="#2f6e49" stroke-width="2" marker-end="url(#shp-norm-arrow)"/>
+<line x1="324" y1="99" x2="344" y2="99" stroke="#2f6e49" stroke-width="2" marker-end="url(#shp-norm-arrow)"/>
+<line x1="484" y1="99" x2="504" y2="99" stroke="#2f6e49" stroke-width="2" marker-end="url(#shp-norm-arrow)"/>
+<line x1="636" y1="99" x2="656" y2="99" stroke="#2f6e49" stroke-width="2" marker-end="url(#shp-norm-arrow)"/>
+<text x="390" y="186" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">Order matters: reproject before deriving the bounding box, always</text>
+<text x="390" y="216" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">A box derived first describes where the geometry used to be</text>
+</svg>
+</figure>
+
+Reading the CRS from the `.prj` file rather than assuming one is the step most often skipped, and it is the one that determines whether the reprojection is even meaningful. A shapefile without a `.prj` has no declared coordinate system at all, and the correct response is to fail rather than to guess — a guess that happens to be wrong produces data that is plausibly positioned and systematically displaced, which is the hardest defect on this site to detect after the fact.
+
+Once normalised, the batches are ordinary Arrow tables and everything downstream — the declared schema, the derived columns, the append with a bounded semaphore — is identical to any other spatial ingest path on this site. That is the goal: the shapefile's peculiarities are handled once, at the boundary, and never leak into the lakehouse.
+Downstream readers should never need to know the data started as a shapefile, and if they do, something was normalised too late.
+Every downstream guide on this site assumes exactly that, which is why the normalisation step is worth doing thoroughly rather than approximately.
+
+A shapefile handled well at the boundary produces a table indistinguishable from one loaded from any other source, and that indistinguishability is the measure of whether the ingest did its job.
+Anything less leaves the format’s constraints to be rediscovered by whoever queries the table next.
+That rediscovery is always more expensive than doing it once at the boundary.
+ Handle it at the boundary, once, and every downstream reader inherits a clean contract.

@@ -140,13 +140,13 @@ print("round-trip OK:", gdf_back.geometry.tolist())
 When all three assertions pass — the null stays `None`, the point geometry compares equal, and the CRS resolves back to `4326` — the mapping is proven lossless and safe to persist. From here the same Arrow table feeds a concurrent load via [async catalog writes with PyIceberg and asyncio](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/async-execution-patterns/async-catalog-writes-with-pyiceberg-and-asyncio/), or an efficient bulk ingest as described in [reading shapefiles into PyIceberg dataframes efficiently](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/pyiceberg-spatial-workflows/reading-shapefiles-into-pyiceberg-dataframes-efficiently/).
 
 <figure class="diagram">
-<svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pipeline mapping a GeoDataFrame geometry column to a WKB Arrow field with attached CRS metadata">
+<svg viewBox="0 51 752 146" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pipeline mapping a GeoDataFrame geometry column to a WKB Arrow field with attached CRS metadata">
 <title>GeoDataFrame to Arrow WKB mapping</title>
 <desc>A GeoDataFrame's Shapely geometry column is serialized to WKB with nulls preserved, attribute columns copied, and CRS plus encoding stamped into schema metadata to yield a GeoParquet-ready Arrow table.</desc>
 <defs>
 <marker id="arw-gpd-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0 L9 4 L0 8 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="240" fill="#f7fbfc"/>
+<rect x="0" y="51" width="752" height="146" fill="#f7fbfc"/>
 <rect x="20" y="70" width="150" height="100" rx="6" fill="#ffffff" stroke="#2f6e49"/>
 <text x="95" y="94" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#0d3b45">GeoDataFrame</text>
 <text x="95" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">Shapely geometry</text>
@@ -174,3 +174,65 @@ When all three assertions pass — the null stays `None`, the point geometry com
 </figure>
 
 The load-bearing decisions are resolving the CRS to a numeric EPSG code before serialization and keeping nulls distinct from empty geometries — get those right and the WKB Arrow table interoperates cleanly with every lakehouse engine. For the encoding standard this mapping conforms to, see [GeoParquet encoding standards](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/), and the [GeoPandas Arrow documentation](https://geopandas.org/en/stable/docs/reference/api/geopandas.GeoDataFrame.to_arrow.html) for the native GeoArrow path.
+
+## The Metadata That Makes the Output Self-Describing
+
+Converting the geometry to a binary column is only half the job; the other half is attaching the metadata that lets a reader interpret those bytes without asking anyone.
+
+<figure class="diagram">
+<svg viewBox="0 0 758 248" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The geo metadata block attached to an Arrow schema, listing version, primary column, encoding, CRS as PROJJSON, geometry types and bounding box, alongside the binary geometry column it describes">
+<rect x="0" y="0" width="758" height="248" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The bytes, and the block that explains them</text>
+<rect x="34" y="60" width="300" height="176" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="184" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Arrow schema</text>
+<text x="184" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">feature_id: int64</text>
+<text x="184" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">bbox_min_x … bbox_max_y: double</text>
+<text x="184" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry: binary</text>
+<text x="184" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">the schema alone says nothing</text>
+<text x="184" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">about what the bytes mean</text>
+<rect x="400" y="60" width="346" height="176" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="573" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">schema metadata: &#8220;geo&#8221;</text>
+<text x="573" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">version, primary_column</text>
+<text x="573" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">encoding: WKB</text>
+<text x="573" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">crs: PROJJSON, not an EPSG integer</text>
+<text x="573" y="182" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry_types, bbox, edges</text>
+<text x="573" y="212" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">this is what survives a copy</text>
+</svg>
+</figure>
+
+Attach it to the **schema**, not to the file, so it survives every operation that preserves the schema — a concatenation, a chunked write, a re-partition. Attaching it at write time only means a chunked write can produce files where the first has metadata and the rest do not, which is a genuinely confusing state to debug.
+
+Write the CRS as PROJJSON rather than as an EPSG code. The code alone depends on the reader having the same registry version and does not pin the datum transformation path, which is the mechanism behind the metre-scale offsets described in the CRS guidance. The full definition is a few hundred bytes and removes the dependency entirely.
+
+## Validating the Schema Before the Write
+
+<figure class="diagram">
+<svg viewBox="0 0 764 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three schema assertions to run before writing: every declared column present with the declared type, geometry column non-null where required, and bounding box columns consistent with the geometry">
+<rect x="0" y="0" width="764" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Fail at conversion, not at commit</text>
+<rect x="26" y="58" width="230" height="132" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">types match exactly</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">no silent int &#8594; float</text>
+<text x="141" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">cast, then compare</text>
+<text x="141" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">against the declaration</text>
+<rect x="274" y="58" width="230" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">geometry is valid</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">no empties, no invalid rings</text>
+<text x="389" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">nulls normalised</text>
+<text x="389" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">to SQL NULL</text>
+<rect x="522" y="58" width="230" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">bbox agrees</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">envelope covers geometry</text>
+<text x="637" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">catches a stale derivation</text>
+<text x="637" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">after a transform</text>
+</svg>
+</figure>
+
+The third check catches a specific and nasty bug: a pipeline that derives bounding boxes and then reprojects, leaving boxes that describe the geometry's previous position. Every value is present, every type is right, and the table's data skipping now excludes exactly the files a query should read. Asserting coverage takes one vectorised comparison and rules it out permanently.
+
+Run all three assertions inside the conversion function itself rather than as a separate step. A conversion that can only produce valid output is a much stronger guarantee than a conversion followed by a validation somebody may forget to call, and the cost is a few milliseconds per batch.
+The result is a conversion that either produces a correct, self-describing table or raises — with no third outcome in which it produces something that merely looks right.
+That property is what makes the conversion safe to call from a dozen pipelines without reviewing each of them.
+Callers get correctness by default rather than by discipline.
+The schema definition then becomes the single artefact worth reviewing carefully, and everything downstream inherits its guarantees.
+Review it once, thoroughly, and the review holds for every table written through it.

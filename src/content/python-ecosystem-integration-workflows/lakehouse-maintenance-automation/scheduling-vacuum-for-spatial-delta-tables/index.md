@@ -141,11 +141,11 @@ print("time-travel target still readable:", len(dt_old.files()), "files")
 ```
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Delta OPTIMIZE then VACUUM with a retention window protecting recent versions">
+<svg viewBox="0 0 652 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Delta OPTIMIZE then VACUUM with a retention window protecting recent versions">
 <defs>
 <marker id="arw-delta-vac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="652" height="256" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">OPTIMIZE then VACUUM under a retention floor</text>
 <rect x="30" y="70" width="150" height="60" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
 <text x="105" y="95" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#0d3b45">small bbox files</text>
@@ -168,3 +168,56 @@ print("time-travel target still readable:", len(dt_old.files()), "files")
 </figure>
 
 Before writing new geometry into the table, gate it with the checks in [building a schema validation pipeline for geospatial tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/), and watch for coordinate-system regressions with [detecting CRS drift in ingestion pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/). The authoritative reference for these operations is the [Delta Lake utility commands documentation](https://docs.delta.io/latest/delta-utility.html#remove-files-no-longer-referenced-by-a-delta-table) and the [delta-rs usage guide](https://delta-io.github.io/delta-rs/usage/optimize/small-file-compaction-with-optimize/).
+
+## Why Spatial Tables Vacuum Differently
+
+Vacuum removes files no longer referenced by any retained version, and two properties of spatial tables change how the calculation lands.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 234" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two spatial specific factors in vacuum planning: large geometry files mean a single rewrite orphans far more bytes, and long running spatial jobs extend the minimum safe retention window">
+<rect x="0" y="0" width="762" height="234" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two reasons the defaults do not fit</text>
+<rect x="30" y="58" width="352" height="164" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="206" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">geometry is heavy</text>
+<text x="206" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one Z-order rewrite of a partition</text>
+<text x="206" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">can orphan hundreds of GB</text>
+<text x="206" y="170" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">storage grows fast between vacuums</text>
+<text x="206" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">so vacuum matters more here</text>
+<rect x="398" y="58" width="352" height="164" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="574" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">spatial jobs run long</text>
+<text x="574" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a continental reprojection or</text>
+<text x="574" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">backfill can run for hours</text>
+<text x="574" y="170" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">retention must exceed the longest</text>
+<text x="574" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">so retention cannot be short</text>
+</svg>
+</figure>
+
+The two pull in opposite directions, which is the whole difficulty: the storage pressure argues for frequent, aggressive vacuum, and the long-running-job risk argues for a generous retention window. The resolution is to vacuum *frequently* with a *generous* window — running daily at 168 hours reclaims steadily while never approaching the danger zone, whereas running weekly at 24 hours does the opposite of what is wanted on both counts.
+
+## What Vacuum Does Not Reclaim
+
+<figure class="diagram">
+<svg viewBox="0 0 764 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three categories of storage a vacuum leaves behind: files referenced by retained versions, files from failed writes outside the table path, and data in other tables copied from this one">
+<rect x="0" y="0" width="764" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Storage vacuum will never touch</text>
+<rect x="26" y="58" width="230" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">still referenced</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a retained version needs it</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">shorten retention, or</text>
+<text x="141" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">accept the cost</text>
+<rect x="274" y="58" width="230" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">outside the table path</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">staging files, aborted writes</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">needs a lifecycle rule</text>
+<text x="389" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">on the bucket</text>
+<rect x="522" y="58" width="230" height="132" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">copies elsewhere</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">extracts, derived tables</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">a separate lifecycle</text>
+<text x="637" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">and a separate owner</text>
+</svg>
+</figure>
+
+The middle category catches teams by surprise during a storage audit. Aborted writes frequently leave partial objects under a staging prefix that the table's own vacuum does not consider, because they were never part of any version. A bucket lifecycle rule on that prefix costs nothing and reclaims steadily, and it is the only mechanism that will ever remove them.
+
+Set the schedule and the retention window together, write both into the job definition with the reasoning, and review them when the longest-running job on the platform changes — which is the only event that can invalidate the safety margin.

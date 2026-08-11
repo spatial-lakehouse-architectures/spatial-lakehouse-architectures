@@ -200,11 +200,11 @@ def sedona_files_read(sc: SparkContext):
 ```
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One GeoParquet dataset fanned into three engines each running the same ST_Intersects query and reporting rows and files scanned">
+<svg viewBox="0 0 742 243" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One GeoParquet dataset fanned into three engines each running the same ST_Intersects query and reporting rows and files scanned">
 <defs>
 <marker id="arw-gpq-run" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="742" height="243" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Same GeoParquet, same query, three engines</text>
 <rect x="30" y="95" width="150" height="70" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
 <text x="105" y="122" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">GeoParquet</text>
@@ -241,3 +241,61 @@ A representative run at 10M points and ~1% selectivity on a single 16-core node 
 | sedona | 98,214 | full input read | 24.5 |
 
 Identical row counts confirm parity; DuckDB leads on single-node interactive, Trino trails on fixed planning cost, and Sedona pays a session tax that only amortises at far larger volumes. To interpret which corner your real workload belongs in, return to the parent [engine selection method](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/engine-benchmarking-selection/), and for engine-specific tuning consult the [DuckDB geospatial analytics](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/), [Trino spatial SQL federation](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/), and [Sedona distributed spatial compute](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/) guides. The engine SQL references are the [DuckDB spatial functions](https://duckdb.org/docs/stable/core_extensions/spatial/functions), [Trino geospatial functions](https://trino.io/docs/current/functions/geospatial.html), and [Sedona SQL API](https://sedona.apache.org/latest/api/sql/Function/).
+
+## Controlling for the Layout
+
+The single largest source of misleading spatial benchmark results is comparing engines against data laid out in a way none of them will see in production.
+
+<figure class="diagram">
+<svg viewBox="0 0 709 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The same three engines ranked differently on an unsorted export and on a partitioned sorted table, showing that the layout can invert the comparison">
+<rect x="0" y="0" width="709" height="244" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The layout can invert the ranking</text>
+<text x="196" y="62" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">unsorted export</text>
+<rect x="80" y="80" width="232" height="34" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="196" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine A — 180 s</text>
+<rect x="80" y="122" width="200" height="34" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="180" y="145" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine B — 155 s</text>
+<rect x="80" y="164" width="150" height="34" fill="#eaddc8" stroke="#9a5a17" stroke-width="2"/>
+<text x="155" y="187" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine C — 116 s</text>
+<text x="196" y="228" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">all three are scanning everything</text>
+<text x="584" y="62" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">partitioned and sorted</text>
+<rect x="468" y="80" width="52" height="34" fill="#d7e8de" stroke="#2f6e49" stroke-width="2"/>
+<text x="560" y="103" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine A — 2.1 s</text>
+<rect x="468" y="122" width="96" height="34" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="604" y="145" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine B — 3.9 s</text>
+<rect x="468" y="164" width="140" height="34" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="648" y="187" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine C — 5.6 s</text>
+<text x="584" y="228" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">pruning quality now dominates</text>
+</svg>
+</figure>
+
+The inversion is not hypothetical: an engine with a mediocre scan loop and excellent statistics handling loses badly on unsorted data and wins comfortably on a well-laid-out table, and the reverse is equally common. Which of the two is the honest comparison depends entirely on which layout production will use — and since every other page on this site argues for the right-hand one, that is the layout to benchmark.
+
+Run the left-hand configuration too, but label it for what it is: a measurement of raw scan throughput, useful for understanding an engine's floor and useless for predicting production latency.
+
+## Making the Numbers Reproducible
+
+<figure class="diagram">
+<svg viewBox="0 0 768 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four artefacts that make a spatial benchmark reproducible: the generation script for the dataset, the exact table layout definition, the query file, and a pinned environment specification">
+<rect x="0" y="0" width="768" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Four artefacts, or the result is an anecdote</text>
+<rect x="26" y="58" width="172" height="132" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="112" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">data generator</text>
+<text x="112" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">deterministic seed</text>
+<text x="112" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">realistic density skew</text>
+<rect x="212" y="58" width="172" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="298" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">layout definition</text>
+<text x="298" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">partition, sort, stats</text>
+<text x="298" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">as executable DDL</text>
+<rect x="398" y="58" width="172" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="484" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">query file</text>
+<text x="484" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one per engine</text>
+<text x="484" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">same semantics, verified</text>
+<rect x="584" y="58" width="172" height="132" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="670" y="88" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">environment</text>
+<text x="670" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">versions, instance, storage</text>
+<text x="670" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">pinned, not described</text>
+</svg>
+</figure>
+
+The third artefact carries an obligation that is easy to miss: the per-engine queries must be verified to return **identical results**, not merely to look equivalent. Function-name differences between engines frequently come with semantic differences at boundaries, and a benchmark comparing a query that includes touching geometries against one that excludes them is measuring two different questions.

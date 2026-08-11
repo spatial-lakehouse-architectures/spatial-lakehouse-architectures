@@ -10,7 +10,7 @@ layout: layouts/base.njk
 {%- set children = collections.content | childrenOf(page.url) -%}
 {%- set siblings = collections.content | siblingsOf(page.url) -%}
 
-<article class="article {% if isSectionLanding %}article--section{% endif %}" {% if sectionObj %}style="--section-color: {{ sectionObj.color }}"{% endif %}>
+<article class="article {% if isSectionLanding %}article--section{% endif %}" {% if sectionObj %}data-section="{{ sectionObj.slug }}"{% endif %}>
   <div class="container article__container">
 
     <nav class="breadcrumb" aria-label="Breadcrumb">

@@ -110,11 +110,11 @@ WHERE ST_Contains(z.geom, ST_GeomFromBinary(p.geom_wkb));
 The tiled join, restricted to zone `Z-0042`, must return the same count as the brute-force `ST_Contains`.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tile equi-join colocates Iceberg pings and PostgreSQL zones before the exact ST_Intersects test">
+<svg viewBox="0 0 742 246" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tile equi-join colocates Iceberg pings and PostgreSQL zones before the exact ST_Intersects test">
 <defs>
 <marker id="arw-trino-xcat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="742" height="246" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Broadcast-free spatial join via a shared tile key</text>
 <rect x="30" y="60" width="200" height="60" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
 <text x="130" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#0d3b45">iceberg pings</text>
@@ -136,3 +136,76 @@ The tiled join, restricted to zone `Z-0042`, must return the same count as the b
 </figure>
 
 For deeper federation and tuning context, return to the [Trino federation topic area](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/); to compare this approach against distributed Spark joins see [broadcast spatial joins with Apache Sedona](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/sedona-distributed-spatial-compute/broadcast-spatial-joins-with-apache-sedona/), and to pre-optimize the Iceberg side see [optimizing spatial joins with Iceberg Z-ordering](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/optimizing-spatial-joins-with-iceberg-z-ordering/). The canonical function semantics live in the [Trino geospatial functions documentation](https://trino.io/docs/current/functions/geospatial.html).
+
+## Ordering the Predicate for Pushdown
+
+The recipe works; making it fast is entirely a matter of which predicate the connector sees first.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 246" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two predicate orderings in a federated spatial join: a pushdown friendly numeric predicate first which prunes splits, and a geometry function first which forces a full read before filtering">
+<rect x="0" y="0" width="762" height="246" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The same join, two predicate orderings</text>
+<rect x="30" y="58" width="352" height="176" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">numeric first</text>
+<text x="206" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">h3_r5 IN (…) AND bbox ranges</text>
+<text x="206" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">AND ST_Intersects(…)</text>
+<text x="206" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">connector prunes splits</text>
+<text x="206" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">geometry test runs on survivors</text>
+<text x="206" y="220" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">a few GB read</text>
+<rect x="398" y="58" width="352" height="176" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="574" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">geometry first</text>
+<text x="574" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ST_Intersects(…) AND h3_r5 IN (…)</text>
+<text x="574" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">logically identical</text>
+<text x="574" y="172" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">connector stops at the first</text>
+<text x="574" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">expression it cannot translate</text>
+<text x="574" y="220" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">the whole table read</text>
+</svg>
+</figure>
+
+Optimisers do reorder conjunctions, and they do so using selectivity estimates that are unreliable for geometry functions — frequently a fixed default with no relation to the actual data. Writing the order explicitly removes the dependency on that estimate, costs nothing, and is invisible in the result.
+
+## Reducing What Crosses the Network
+
+<figure class="diagram">
+<svg viewBox="0 0 764 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three ways to reduce federated transfer volume: project only needed columns, filter the remote side on a column it understands, and aggregate before joining where the analysis permits">
+<rect x="0" y="0" width="764" height="210" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three reductions, applied in this order</text>
+<rect x="26" y="58" width="230" height="140" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">1. project narrowly</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">name the columns</text>
+<text x="141" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry columns are wide;</text>
+<text x="141" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">leave out what you can</text>
+<rect x="274" y="58" width="230" height="140" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">2. filter remotely</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">on a column it understands</text>
+<text x="389" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">region, date, tenant —</text>
+<text x="389" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">anything but geometry</text>
+<rect x="522" y="58" width="230" height="140" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">3. aggregate early</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">where the analysis allows</text>
+<text x="637" y="138" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">a count per region beats</text>
+<text x="637" y="160" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">shipping every row</text>
+</svg>
+</figure>
+
+The middle reduction is where the largest saving usually sits, and it requires knowing the remote schema well enough to find a column the connector can push. That knowledge is worth writing into the view definition once rather than rediscovering per query — a federated view that already carries the remote-side filter is a view whose users cannot accidentally omit it.
+
+## When Not to Federate at All
+
+The last consideration is whether the join should be federated in the first place. For reference data that changes on a schedule rather than continuously — administrative boundaries, service territories, classification lookups — a scheduled copy into the lakehouse removes the transfer permanently and makes every subsequent query a local one.
+
+The objection is usually freshness, and it is worth examining rather than accepting. A boundary table that a source system updates quarterly does not need to be read live; a daily copy is fresher than the data. Where the source genuinely changes continuously and the analysis genuinely needs the latest state, federation earns its cost — and where it does not, a copy is simpler, faster and removes a runtime dependency on another team's system.
+
+A useful test: if the federated source were unavailable for an hour, would the analysis be wrong or merely delayed? If merely delayed, the data can be copied. If wrong, it must be federated, and the query design guidance above applies in full.
+
+For the operational concerns that come with keeping a federated deployment healthy — connector limits, remote statistics, schema drift — see [Trino spatial SQL federation](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/trino-spatial-sql-federation/).
+
+Answer that question before optimising the query, because a copied table makes the optimisation unnecessary and a federated one makes it mandatory.
+
+The question is also worth revisiting periodically: sources that once changed continuously settle down, and a federated dependency that no longer earns its cost is one of the easier pieces of complexity a platform can retire.
+
+For the query-design habits that make the federated case affordable when it is genuinely required — predicate ordering, narrow projection, remote-side filtering — the sections above cover each in turn, and applying all three together is what keeps a cross-catalog spatial join in the seconds rather than the minutes.
+
+Applying only one of the three usually leaves the query dominated by whichever cost was not addressed, which is why the guidance is a set rather than a menu — and why a query that improved tenfold after one change frequently has another tenfold left in it.
+ Measure after each change rather than after all three, so the contribution of each is visible.
+ A change whose effect you cannot see is a change you cannot defend keeping.

@@ -120,3 +120,145 @@ Even with correct configuration, spatial pushdown can silently degrade. Use the 
 5. **Query Plan Inspection:** Always run `EXPLAIN FORMATTED` before deploying spatial workloads. Look for `PushedFilters` containing `x_min`, `y_min`, or bounding box predicates. If the plan shows `Filter` at the `Project` or `Scan` level without storage-layer predicates, pushdown is disabled or unsupported for that predicate type.
 
 For detailed metrics on how early pruning impacts end-to-end GIS query execution, review [How predicate pushdown reduces GIS query latency](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/how-predicate-pushdown-reduces-gis-query-latency/).
+
+## The Four Places a Predicate Can Be Evaluated
+
+"Pushdown" describes a direction, not a destination. A spatial predicate can be resolved at four distinct layers, and the difference in cost between the outermost and innermost is several orders of magnitude.
+
+<figure class="diagram">
+<svg viewBox="0 0 722 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four evaluation layers for a spatial predicate, from partition pruning in the catalog through file statistics and row group statistics to full geometry evaluation in the engine, with the data volume touched at each layer">
+<defs>
+<marker id="pp-layer-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2f6e49"/></marker>
+</defs>
+<rect x="0" y="0" width="722" height="320" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Where the filter runs decides what it costs</text>
+<rect x="70" y="56" width="640" height="54" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="390" y="78" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">1. partition pruning — in the catalog, no storage touched</text>
+<text x="390" y="98" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: microseconds · eliminates: 90–99% of files</text>
+<rect x="118" y="122" width="544" height="54" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="390" y="144" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">2. file statistics — manifest or transaction log</text>
+<text x="390" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: milliseconds · eliminates: most of what survived</text>
+<rect x="166" y="188" width="448" height="54" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="390" y="210" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">3. row-group statistics — inside each opened file</text>
+<text x="390" y="230" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: one footer read per file · needs the file to be sorted</text>
+<rect x="214" y="254" width="352" height="54" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="390" y="276" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">4. exact geometry predicate — in the engine</text>
+<text x="390" y="296" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: per surviving row · the only layer that is exact</text>
+<line x1="390" y1="110" x2="390" y2="122" stroke="#2f6e49" stroke-width="2" marker-end="url(#pp-layer-arrow)"/>
+<line x1="390" y1="176" x2="390" y2="188" stroke="#2f6e49" stroke-width="2" marker-end="url(#pp-layer-arrow)"/>
+<line x1="390" y1="242" x2="390" y2="254" stroke="#2f6e49" stroke-width="2" marker-end="url(#pp-layer-arrow)"/>
+</svg>
+</figure>
+
+Layers one through three are all **approximate and cheap**: they can only prove that data cannot match, never that it does. Layer four is exact and expensive. A well-tuned spatial query is one where the first three layers have reduced the candidate set to something small enough that the fourth layer's cost is irrelevant, and every optimisation on this page is ultimately about feeding the first three layers information they can use.
+
+The critical property is that each layer needs a **numeric** predicate. None of them can evaluate a geometry function. `ST_Intersects(geom, :window)` is opaque to all three cheap layers, so a query expressing only that predicate skips straight to layer four and reads the entire table. Adding `AND bbox_min_x <= :maxx AND bbox_max_x >= :minx AND bbox_min_y <= :maxy AND bbox_max_y >= :miny` gives every cheap layer something to work with, and the geometry test then runs on the survivors. The two predicates together are logically redundant and operationally essential.
+
+## Writing the Redundant Predicate Without Burdening Callers
+
+Requiring every caller to write four extra comparisons is a policy that fails within a month, because someone will forget, and their query will be correct and slow rather than incorrect and loud.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three ways to supply the numeric bounding box predicate on the caller's behalf: a view that accepts a window, a table valued function, and a client library that rewrites the query before submission">
+<rect x="0" y="0" width="764" height="210" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three ways to make the fast query the easy one</text>
+<rect x="26" y="58" width="230" height="140" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">a view</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">derives bbox columns from</text>
+<text x="141" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">the geometry it exposes</text>
+<text x="141" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">works everywhere</text>
+<text x="141" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">caller still writes the filter</text>
+<rect x="274" y="58" width="230" height="140" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">a table function</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">takes the window as</text>
+<text x="389" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">four parameters</text>
+<text x="389" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">nothing to forget</text>
+<text x="389" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">engine support varies</text>
+<rect x="522" y="58" width="230" height="140" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">a client helper</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">builds the SQL from a</text>
+<text x="637" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">geometry argument</text>
+<text x="637" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">best ergonomics</text>
+<text x="637" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">only helps its own users</text>
+</svg>
+</figure>
+
+The table-valued function is the strongest option where the engine supports it, because the window is a parameter rather than a convention and there is no way to call it without supplying one. Where it is unavailable, a client helper covers the majority of traffic and a view covers the rest, and the combination is usually enough. What does not work is documentation alone: the failure mode is silent, so nothing corrects a caller who ignores it.
+
+Whichever route is chosen, add a **plan assertion** to the pipeline that runs representative queries and fails when the file count scanned exceeds a threshold. That converts "somebody wrote a slow query" from an invisible cost into a build failure, and it is the only mechanism on this page that keeps working when the person who set up the conventions has moved on.
+
+## When Pushdown Silently Stops Working
+
+Pushdown is fragile in a specific way: several unrelated changes disable it without changing results, so the symptom is always "the same query got slower" with no obvious cause.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 254" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six changes that silently disable spatial predicate pushdown: a function wrapped around the indexed column, a cast introduced by type mismatch, statistics dropped beyond the writer column limit, an OR that spans columns, a subquery the optimiser cannot fold, and unsorted appends since the last compaction">
+<rect x="0" y="0" width="764" height="254" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Six ways pushdown disappears without an error</text>
+<rect x="26" y="56" width="230" height="86" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="141" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">function on the column</text>
+<text x="141" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">round(bbox_min_x) &lt; 10</text>
+<text x="141" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">opaque to statistics</text>
+<rect x="274" y="56" width="230" height="86" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">implicit cast</text>
+<text x="389" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">DOUBLE column vs DECIMAL literal</text>
+<text x="389" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">cast wraps the column</text>
+<rect x="522" y="56" width="230" height="86" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="637" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">statistics not collected</text>
+<text x="637" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">column beyond the writer limit</text>
+<text x="637" y="126" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">nothing to compare against</text>
+<rect x="26" y="156" width="230" height="86" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="141" y="182" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">OR across columns</text>
+<text x="141" y="206" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">bbox_min_x &lt; 10 OR tag = &#8216;x&#8217;</text>
+<text x="141" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6a3d9a">neither side can prune alone</text>
+<rect x="274" y="156" width="230" height="86" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="182" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">unfoldable subquery</text>
+<text x="389" y="206" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">bounds from another table</text>
+<text x="389" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">not known at planning time</text>
+<rect x="522" y="156" width="230" height="86" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="182" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">unsorted appends</text>
+<text x="637" y="206" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">since the last compaction</text>
+<text x="637" y="226" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">statistics exist but are loose</text>
+</svg>
+</figure>
+
+The implicit-cast case deserves emphasis because it is invisible in the SQL text. A `DOUBLE` column compared against a literal the engine parses as `DECIMAL` produces a plan where the column is wrapped in a cast, and a wrapped column cannot be matched against statistics. Writing the literal with an explicit type — or as a value that parses to a double unambiguously — restores pruning and changes nothing else about the query.
+
+The unfoldable subquery case is the one with the least satisfying fix. When the query window comes from another table, the planner does not know it at planning time and cannot prune. Where that pattern is common, resolve the bounds in the client and inline them as literals, or use a dynamic-filtering-capable engine and confirm from the plan that the dynamic filter is actually being applied rather than merely being available.
+
+## Reading the Plan in Each Engine
+
+Confirming pushdown means reading a query plan, and every engine reports it differently. Knowing where to look turns a twenty-minute investigation into a thirty-second one.
+
+**Spark** shows it in two places. `PushedFilters` on the scan node lists the predicates the data source accepted — a predicate absent from that list is being applied above the scan and prunes nothing. The `numFiles` and `filesPruned` metrics on the executed plan give the actual reduction. Read both: filters can be pushed and still prune nothing when statistics are missing.
+
+**Trino** reports it through `EXPLAIN ANALYZE`, where the `ScanFilterProject` operator shows input rows and the split count. The number to compare is input rows against the table's total rows; a selective query reading everything means the connector received no usable predicate. Trino also exposes per-query statistics through its web interface, which is faster to read than the text plan during an incident.
+
+**DuckDB** prints per-operator row counts from `EXPLAIN ANALYZE`, and the Parquet reader reports the number of row groups scanned against the number available. That ratio is the clearest single indicator available in any engine, because it isolates within-file skipping from file-level pruning.
+
+The habit worth building is to record these numbers for a fixed query set on a schedule rather than to check them reactively. Pruning degrades gradually — as unsorted data accumulates, as a schema change moves a column past the statistics limit, as a partition spec evolves — and a time series makes the degradation visible while it is still cheap to fix. A single reading taken during an incident tells you the current state and nothing about when it changed, which is usually the more useful fact.
+
+## The Predicate Rewrite That Costs Nothing
+
+There is one transformation that improves nearly every spatial query and requires no changes to the table: expressing the spatial filter as a conjunction ordered from cheapest to most expensive.
+
+The bounding-box comparisons come first, because they can be pushed to every layer. Any partition-column predicate comes before them if the value is known. The exact geometry test comes last. Optimisers generally reorder conjunctions themselves, but they reorder based on estimated selectivity, and their estimates for geometry functions are frequently wrong — often defaulting to a fixed guess that bears no relation to the actual selectivity. Writing the order explicitly costs nothing and removes the dependence on that estimate.
+
+A second, related rewrite: replace `ST_Distance(geom, point) < r` with a bounding-box pre-filter plus the distance test. The distance function alone cannot be pushed anywhere, and it also computes an exact distance for every row when only a comparison is needed. Expanding the point by `r` into a box, filtering on the numeric bounds, and then applying the distance test to the survivors gives identical results and typically reads a small fraction of the data.
+
+Both rewrites are mechanical enough to be applied by a helper library or a view, which is where they belong — a transformation that has to be remembered by every author is a transformation that will be applied inconsistently.
+
+## A Regression Suite for Pruning
+
+Everything on this page is a property that can silently stop holding, which makes it a natural fit for automated assertion rather than for periodic review.
+
+Build the suite from three or four queries that represent the real access patterns — a small window, a large window, a window plus a time filter, a join against a reference table — and record for each the number of files scanned, the bytes read and the wall-clock. Assert on the ratios rather than on absolute values, because absolute numbers drift as the table grows and a threshold expressed in gigabytes will need constant revision, while "reads under two percent of files" stays meaningful for years.
+
+Run it against a snapshot rather than against the live table, so a concurrent write cannot make the result flap. Pinning a snapshot identifier also makes the results comparable across runs, which is what turns the suite from a pass/fail gate into a trend that shows degradation before it crosses the threshold.
+
+Where the suite fails, the diagnosis order is always the same: check that the predicate reached the scan, check that statistics exist for the columns it references, check that the files are still sorted, and check that the partition specification has not changed underneath. Four checks, in that order, resolve the overwhelming majority of pushdown regressions — and having them written down as a runbook matters more than it sounds, because pushdown failures surface as generic slowness and the instinct is to reach for engine tuning first.
+
+Finally, keep the suite in the same repository as the pipeline that writes the table. A pruning regression is almost always caused by a change to the writer — a new column, a reordered schema, a changed partition spec, a dropped sort order — so the test that catches it belongs where that change is reviewed.
+
+None of this is exotic engineering. It is the ordinary discipline of writing down what the system is supposed to do, measuring whether it still does, and making the measurement fail loudly. Spatial workloads simply make the discipline pay for itself faster, because the gap between a query that prunes and one that does not is measured in orders of magnitude rather than percentages.
+ The measurement is the whole discipline.

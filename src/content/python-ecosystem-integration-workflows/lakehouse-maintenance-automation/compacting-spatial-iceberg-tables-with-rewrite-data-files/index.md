@@ -154,11 +154,11 @@ ORDER BY committed_at DESC LIMIT 3;
 If `operation` reads anything other than `replace`, the rewrite did more than reorganize files and you should investigate before trusting the result. You can also compare `summary['total-data-files']` between the two most recent snapshots to quantify the reduction — going from, say, 512 to 47 files is the number to log and alert on.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Many small spatially-scattered files merged and bbox-sorted into fewer large files">
+<svg viewBox="0 0 718 221" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Many small spatially-scattered files merged and bbox-sorted into fewer large files">
 <defs>
 <marker id="arw-ice-compact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="718" height="221" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Sort-based rewrite: small scattered files to bbox-clustered files</text>
 <text x="140" y="58" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="600" fill="#33707d">before: 12 small files</text>
 <rect x="40" y="70" width="46" height="30" rx="3" fill="#ffffff" stroke="#9a5a17" stroke-width="1.5"/>
@@ -186,3 +186,64 @@ If `operation` reads anything other than `replace`, the rewrite did more than re
 </figure>
 
 The same clustering principle underpins Z-ordering; for the multi-dimensional variant used on spatial joins see [Z-ordering for geospatial queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/), and for the Delta-side equivalent of this whole flow see [scheduling VACUUM for spatial Delta tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/). The authoritative parameter reference is the Iceberg [Spark procedures documentation](https://iceberg.apache.org/docs/latest/spark-procedures/#rewrite_data_files) and the [maintenance guide](https://iceberg.apache.org/docs/latest/maintenance/#compact-data-files).
+
+## Choosing a Rewrite Strategy
+
+`rewrite_data_files` offers more than one strategy, and the choice changes both the cost and the benefit substantially on a spatial table.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three rewrite strategies compared: binpack which only merges files, sort which orders rows within the rewritten set, and zorder which interleaves two spatial columns, with their relative cost and effect on pruning">
+<rect x="0" y="0" width="764" height="244" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three strategies, three cost-benefit points</text>
+<rect x="26" y="56" width="230" height="176" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="141" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">binpack</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">merges small files only</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">cost: lowest, no shuffle</text>
+<text x="141" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">fixes: file count</text>
+<text x="141" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">does not fix: clustering</text>
+<text x="141" y="214" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">use hourly</text>
+<rect x="274" y="56" width="230" height="176" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">sort</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">orders by declared columns</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">cost: shuffle within scope</text>
+<text x="389" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">fixes: one-dimensional locality</text>
+<text x="389" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">good for time-first keys</text>
+<text x="389" y="214" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">use daily</text>
+<rect x="522" y="56" width="230" height="176" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">zorder</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">interleaves two coordinates</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">cost: highest</text>
+<text x="637" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">fixes: two-dimensional locality</text>
+<text x="637" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">the one spatial queries want</text>
+<text x="637" y="214" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">use on partition close</text>
+</svg>
+</figure>
+
+The pattern that balances cost against benefit is to run binpack frequently against the open partition — it is cheap, needs no shuffle, and keeps the file count under control as micro-batches arrive — and to run the Z-order rewrite once, when the partition closes and will not be written to again. The expensive operation then happens exactly once per partition for the lifetime of the table.
+
+## Scoping the Rewrite
+
+<figure class="diagram">
+<svg viewBox="0 0 764 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Filters that scope a rewrite: a partition predicate limiting which data is touched, a file size threshold selecting only small files, and a maximum group size bounding each task">
+<rect x="0" y="0" width="764" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three limits that keep a rewrite bounded</text>
+<rect x="26" y="58" width="230" height="132" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">partition predicate</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">where clause on the key</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">avoids touching history</text>
+<text x="141" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">and avoids write conflicts</text>
+<rect x="274" y="58" width="230" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">min-file-size</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">only rewrite what is small</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">already-large files are</text>
+<text x="389" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">left untouched</text>
+<rect x="522" y="58" width="230" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">max-file-group-size</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">bounds each task&#8217;s input</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">prevents one enormous</text>
+<text x="637" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">straggler task</text>
+</svg>
+</figure>
+
+The middle limit is the one most often left at its default and most worth tuning on a spatial table, because geometry-heavy files reach the target size at far lower row counts than scalar data. Setting it from the observed size distribution rather than from a general default avoids rewriting files that were already fine.
+Measure the distribution once with a metadata query, set the threshold from it, and revisit only when the data shape changes.

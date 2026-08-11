@@ -27,10 +27,10 @@ The three systems disagree on four properties that matter for partitioning: cell
 **Geohash** interleaves latitude and longitude bits and base-32 encodes them into strings where each added character refines the cell and every prefix is a valid coarser cell. Cells are lat/lon rectangles in EPSG:4326, so they distort badly toward the poles and are non-square at most latitudes. Geohash has no native hexagonal neighborhood; adjacency requires computing the eight bordering rectangles, and neighbors across a base-32 "seam" share no common prefix — the classic geohash edge problem.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three discrete global grids covering the same map extent, each feeding a partition column in a lakehouse table">
+<svg viewBox="0 0 752 212" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three discrete global grids covering the same map extent, each feeding a partition column in a lakehouse table">
 <title>H3, S2 and geohash over the same area, mapped to a partition column</title>
 <desc>Left: the same rectangular map extent tiled three ways — hexagons for H3, Hilbert-ordered quadrilaterals for S2, and axis-aligned base-32 rectangles for geohash. Right: each grid encodes a point into a cell id that becomes the table partition key.</desc>
-<rect x="0" y="0" width="760" height="300" fill="#f7fbfc"/>
+<rect x="0" y="0" width="752" height="212" fill="#f7fbfc"/>
 <text x="380" y="24" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#0d3b45" font-weight="bold">One extent, three grids, one partition column</text>
 <!-- H3 panel -->
 <rect x="20" y="44" width="150" height="150" fill="#ffffff" stroke="#cfe3e7"/>
@@ -61,7 +61,7 @@ The three systems disagree on four properties that matter for partitioning: cell
 <rect x="419" y="114" width="34" height="24" fill="#f2e8da" stroke="#9a5a17"/>
 <rect x="453" y="114" width="34" height="24" fill="#f2e8da" stroke="#9a5a17"/>
 <rect x="385" y="138" width="34" height="24" fill="#f2e8da" stroke="#9a5a17"/>
-<text x="435" y="164" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#0d3b45">prefix = parent</text>
+<text x="435" y="182" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#0d3b45">prefix = parent</text>
 <!-- mapping to partition column -->
 <line x1="510" y1="119" x2="560" y2="119" stroke="#33707d" stroke-width="2" marker-end="url(#arw-grid-select)"/>
 <rect x="560" y="80" width="180" height="120" fill="#ffffff" stroke="#0e6e7d" stroke-width="1.5"/>
@@ -217,3 +217,87 @@ A healthy plan lists the grid column under partition filters and shows a bucket/
 | S2/H3 ids differ between ingest and query | Mismatched library version or resolution/level constant | Pin `h3>=4.1`, `s2sphere>=0.2.5`; centralize the resolution constant |
 
 Once you have chosen a grid, the two guides in this topic area go deeper: a full [head-to-head H3 vs S2 vs geohash comparison](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/) with runnable cardinality benchmarks, and a data-driven method for [choosing an H3 resolution for point data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/). Authoritative references: the [H3 documentation](https://h3geo.org/docs/) and the [S2 Geometry library](https://s2geometry.io/).
+
+## What "Discrete Global Grid" Actually Guarantees
+
+The three systems compared on this page differ in geometry, but they share a set of properties that is worth stating explicitly, because the properties — not the shapes — are what make a grid useful as a partition key.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four properties a discrete global grid provides for lakehouse partitioning: total coverage with no gaps, a stable integer identifier per cell, a hierarchy where a child identifier implies its parent, and a computable neighbourhood for window expansion">
+<rect x="0" y="0" width="762" height="270" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">The four properties that make a grid usable as a key</text>
+<rect x="30" y="56" width="352" height="94" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">total coverage</text>
+<text x="206" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">every point on Earth is in exactly one cell</text>
+<text x="206" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">no gaps, no overlaps, no null partition</text>
+<rect x="398" y="56" width="352" height="94" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="574" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">stable identifier</text>
+<text x="574" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a 64-bit integer, deterministic forever</text>
+<text x="574" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">the same point always yields the same cell</text>
+<rect x="30" y="164" width="352" height="94" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="190" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">hierarchy</text>
+<text x="206" y="214" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a fine cell&#8217;s parent is computable</text>
+<text x="206" y="236" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">enables mixed-resolution partitioning</text>
+<rect x="398" y="164" width="352" height="94" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="190" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">computable neighbourhood</text>
+<text x="574" y="214" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a window expands to a cell list without a scan</text>
+<text x="574" y="236" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">this is what makes pruning possible</text>
+</svg>
+</figure>
+
+The fourth property is the one that does the work in a lakehouse. Partition pruning requires the planner to convert "this bounding box" into "these partition values" before reading anything, and that conversion is only possible when the grid can enumerate the cells covering an arbitrary region cheaply. A grid without that property can still label rows, but it cannot accelerate a query, which makes it decorative.
+
+The third property decides whether the scheme can adapt. A hierarchy where a child's identifier determines its parent allows a table to hold cells at several resolutions simultaneously and still answer a query correctly — coarse cells in sparse regions, fine cells in dense ones. Without it, mixed-resolution layouts require an explicit lookup on every read, which is workable but noticeably more machinery.
+
+The first property matters for a reason that only shows up in production: it guarantees there is no null partition. Data that falls outside a bespoke grid has to go somewhere, and that somewhere becomes an unbounded partition holding everything the scheme failed to anticipate — the antimeridian crossings, the coordinates at exactly ±90°, the rows whose geometry is empty. A global grid removes the category.
+
+## Cell Identifiers as Data, Not as Labels
+
+Treating the cell identifier as an ordinary column with ordinary requirements avoids most of the operational problems that follow a grid choice.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Requirements for storing a grid cell identifier: integer typed rather than a hex string, resolution recorded separately, derivation version recorded, and statistics enabled so the planner can prune on it">
+<rect x="0" y="0" width="766" height="230" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Four requirements for the cell column</text>
+<rect x="26" y="58" width="356" height="72" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="204" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">BIGINT, never a hex string</text>
+<text x="204" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">strings sort lexically and defeat range predicates</text>
+<rect x="398" y="58" width="356" height="72" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="576" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">resolution in the column name</text>
+<text x="576" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">h3_r5, not cell_id — the level must be visible</text>
+<rect x="26" y="146" width="356" height="72" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="204" y="172" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">derivation version recorded</text>
+<text x="204" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">so a library upgrade is detectable, not silent</text>
+<rect x="398" y="146" width="356" height="72" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="576" y="172" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">statistics enabled</text>
+<text x="576" y="196" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">a column with no min/max prunes nothing</text>
+</svg>
+</figure>
+
+The naming requirement earns its place through a specific failure. A column called `cell_id` is ambiguous the moment a second resolution is introduced, and tables frequently acquire a second resolution — a coarse one for partitioning and a fine one for aggregation. Encoding the level in the name makes a mismatched join fail at parse time rather than return an empty result.
+
+The derivation version matters because grid libraries do change, rarely but consequentially. A cell assignment that shifts at a boundary between library versions puts a small number of rows in a different partition than the same coordinates would produce today, and the effect is a query that misses a handful of rows near cell edges. Recording the version alongside the identifier makes that detectable with a group-by rather than by comparison against a re-derivation of the entire table.
+
+## Migrating Between Grids
+
+Changing grid system after a table is populated is uncommon but not rare, and it happens for two reasons: a library licensing or support change, or the discovery that the chosen system handles the workload's geometry badly.
+
+The migration is mechanically simple and operationally awkward. Deriving the new cell identifier is a per-row computation from coordinates that are already present, so it parallelises perfectly and costs one pass over the data. The awkwardness is that the new column cannot become the partition key without a rewrite, and every consumer that references the old column has to move.
+
+The additive pattern applies here as it does to schema evolution generally. Add the new cell column, backfill it, keep both populated on the write path, migrate readers individually, and drop the old column when nothing reads it. Where the format supports partition evolution, the partition key can switch at a point in time with old data staying under the old specification, which makes the rewrite optional and schedulable rather than blocking.
+
+One consideration is specific to grids. Because cell identifiers are opaque integers, a consumer using the wrong column produces no error and no obviously wrong output — just an empty or partial result. Give the new column a clearly different name, and consider making the old column's values invalid under the new derivation so a mismatch fails rather than returning nothing. Silence is the failure mode to design against.
+
+Before committing to a migration, verify that the problem is genuinely the grid. Most complaints attributed to grid choice turn out to be resolution choice, skew, or a missing predicate on the partition column — all of which are cheaper to fix and none of which improves by changing systems. Reserve the migration for cases where a property of the grid itself, such as its behaviour at the poles or its cell-shape distortion at high latitudes, is demonstrably the cause.
+
+## Resolution Is a Bigger Decision Than System
+
+Teams spend more time choosing between grid systems than choosing a resolution, and the effect sizes point the other way.
+
+Switching between the three systems at the same nominal cell size changes query performance by a modest amount — the differences are in cell shape, identifier structure and library ergonomics rather than in how much data a query reads. Changing resolution by one level changes the number of cells covering a fixed area by a factor of roughly five to seven, which changes partition count, average partition size and the number of partitions a typical query touches by the same factor. That is the decision that determines whether the table performs.
+
+The right procedure is to fix the resolution from the query extent first, then choose the system on secondary criteria: which library is already in the stack, whether the workload needs uniform cell shapes for aggregation, whether identifiers need to be human-readable, whether polar coverage matters. Making the choice in that order takes an afternoon; making it in the reverse order produces a well-argued system choice at a resolution that does not fit the workload.
+
+The detailed procedure for fixing the resolution is in [choosing H3 resolution for point data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/), and the system-level comparison, once the resolution is settled, is in [H3 vs S2 vs geohash for lakehouse partitioning](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/h3-vs-s2-vs-geohash-for-lakehouse-partitioning/).
+
+Whichever system a table settles on, record the choice, the resolution and the library version in the table's own properties so that the next person to touch it inherits the reasoning rather than reverse-engineering it from the data.

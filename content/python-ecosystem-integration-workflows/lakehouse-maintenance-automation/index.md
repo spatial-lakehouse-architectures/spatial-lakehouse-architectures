@@ -15,12 +15,12 @@ Automated maintenance is not free — it consumes compute, holds table locks, an
 The rule of thumb: **validation runs on every write, compaction runs on a cadence proportional to write frequency, and expiration runs least often but with the strictest safety checks** because it is the only irreversible operation of the three. A hot IoT telemetry table might validate on every micro-batch, compact hourly, and expire snapshots nightly; a monthly-refreshed parcel boundary table might validate per load, compact after each load, and expire weekly.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Scheduler dispatching compaction, vacuum and validation jobs against a spatial table with monitoring feedback">
+<svg viewBox="0 0 752 308" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Scheduler dispatching compaction, vacuum and validation jobs against a spatial table with monitoring feedback">
 <defs>
 <marker id="arw-maint-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 <marker id="arw-maint-mon" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9a5a17"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="300" fill="#f7fbfc"/>
+<rect x="0" y="0" width="752" height="308" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Automated spatial-table maintenance loop</text>
 <rect x="20" y="90" width="150" height="120" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
 <text x="95" y="120" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="600" fill="#0d3b45">Scheduler</text>
@@ -45,7 +45,7 @@ The rule of thumb: **validation runs on every write, compaction runs on a cadenc
 <text x="625" y="267" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">file counts, snapshot age, metrics</text>
 <line x1="170" y1="120" x2="250" y2="82" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
 <line x1="170" y1="150" x2="250" y2="150" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
-<line x1="170" y1="180" x2="250" y2="215" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
+<polyline points="170,180 205,180 205,219 250,219" fill="none" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
 <line x1="430" y1="82" x2="510" y2="130" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
 <line x1="430" y1="150" x2="510" y2="150" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
 <line x1="430" y1="219" x2="510" y2="170" stroke="#0e6e7d" stroke-width="2" marker-end="url(#arw-maint-flow)"/>
@@ -328,3 +328,63 @@ Expected ratios: a partition of 500 files averaging 12 MB compacts to roughly 45
 | Row count changes after a rewrite | A filter/where expression leaked into the rewrite options | Remove any `where` from the rewrite call; rewrites must be layout-only — verify with the bbox integrity query |
 
 Compaction, expiration, and validation are not independent chores — they compose into a single automated loop where validation protects the write, compaction protects query performance, and expiration protects storage cost, all under a scheduler that fires each only when monitoring says it is needed. Follow the three deep-dive guides for the complete, copy-paste implementations: [compacting spatial Iceberg tables with rewrite_data_files](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/), [scheduling VACUUM for spatial Delta tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/), and [building a schema validation pipeline for geospatial tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/schema-validation-pipeline-for-geospatial-tables/). For authoritative reference, consult the [Apache Iceberg maintenance documentation](https://iceberg.apache.org/docs/latest/maintenance/), the Iceberg [Spark procedures reference](https://iceberg.apache.org/docs/latest/spark-procedures/), and the [Delta Lake utility commands](https://docs.delta.io/latest/delta-utility.html).
+
+## Scheduling the Three Jobs Against Each Other
+
+Compaction, snapshot expiry and orphan cleanup are usually configured independently, and they interact in ways that make an independent schedule wrong.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ordering constraint between the three maintenance jobs: compaction creates new files and orphans old snapshots, expiry must run after it to release them, and orphan cleanup must run last with a retention margin beyond the longest in-flight write">
+<defs>
+<marker id="maint-ord-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="766" height="256" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Order matters: each job creates work for the next</text>
+<rect x="26" y="70" width="216" height="98" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="134" y="98" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">1. compact</text>
+<text x="134" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">writes new files,</text>
+<text x="134" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">supersedes old ones</text>
+<rect x="282" y="70" width="216" height="98" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="390" y="98" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">2. expire snapshots</text>
+<text x="390" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">releases the references</text>
+<text x="390" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">compaction left behind</text>
+<rect x="538" y="70" width="216" height="98" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="646" y="98" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">3. remove orphans</text>
+<text x="646" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">deletes unreferenced files</text>
+<text x="646" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">older than the safety margin</text>
+<line x1="242" y1="119" x2="282" y2="119" stroke="#0e6e7d" stroke-width="2" marker-end="url(#maint-ord-arrow)"/>
+<line x1="498" y1="119" x2="538" y2="119" stroke="#0e6e7d" stroke-width="2" marker-end="url(#maint-ord-arrow)"/>
+<text x="390" y="212" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">Run 3 before 2 and nothing is reclaimed; run 3 with too small a margin and live files are deleted</text>
+<text x="390" y="240" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">The margin must exceed the longest possible in-flight write, not the average one</text>
+</svg>
+</figure>
+
+Running orphan cleanup before expiry is the harmless mistake: the files compaction superseded are still referenced by live snapshots, so nothing is reclaimed and the storage graph stays flat while the job reports success. The expensive mistake is the safety margin. A cleanup that deletes files younger than the longest in-flight write will occasionally delete a file a pending commit is about to reference, and the resulting table is broken in a way that only a restore fixes.
+
+Set the margin from the observed maximum, not the mean. On a spatial platform the maximum is usually a backfill or a large reprojection job, and it can be hours longer than anything that runs daily. Twenty-four hours is a common and defensible default; going below it needs a specific reason and a check that no long job overlaps.
+
+## Deciding What to Compact, and When
+
+<figure class="diagram">
+<svg viewBox="0 0 764 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three signals that select compaction targets: file count per partition, median file size, and clustering overlap factor, each pointing at a different remedy">
+<rect x="0" y="0" width="764" height="210" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Pick targets from metadata, not from a schedule</text>
+<rect x="26" y="58" width="230" height="140" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">file count high</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">many small appends</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">remedy: bin-pack</text>
+<text x="141" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">cheap, no sort needed</text>
+<rect x="274" y="58" width="230" height="140" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">median size low</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">partition too fine</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">remedy: coarsen the key</text>
+<text x="389" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">compaction only masks it</text>
+<rect x="522" y="58" width="230" height="140" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">overlap factor high</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">ordering has decayed</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">remedy: sort rewrite</text>
+<text x="637" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">expensive, do it scoped</text>
+</svg>
+</figure>
+
+The middle column is the one that gets misdiagnosed most often. A partition whose files are all small after compaction does not have a compaction problem; it has a partition-key problem, and running compaction more frequently against it burns compute without changing the outcome. Distinguishing the three signals before scheduling work is what keeps the maintenance budget proportional to the benefit.

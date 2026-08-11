@@ -95,6 +95,58 @@ The decision table below summarizes where each wins.
 
 The pragmatic answer for lakehouse tables is often *both*: write GeoParquet metadata for interoperability and keep explicit bbox `DOUBLE` columns so engines that never parse the `geo` block still prune files. Pure raw-WKB makes sense when the catalog is authoritative and readers are homogeneous; pure GeoParquet makes sense when files leave your platform.
 
+## What Each Choice Costs a Future Reader
+
+The trade-off is easiest to judge from the perspective of somebody who finds the files in three years with no access to the pipeline that produced them.
+
+<figure class="diagram">
+<svg viewBox="0 0 758 238" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comparison of a self-describing GeoParquet file against a plain WKB binary column, from the perspective of a future reader who must determine the encoding, coordinate reference system and geometry types">
+<rect x="0" y="0" width="758" height="238" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">What a reader can learn from the file alone</text>
+<rect x="34" y="58" width="330" height="168" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="199" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">GeoParquet column</text>
+<text x="199" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">encoding: stated</text>
+<text x="199" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">CRS: stated as PROJJSON</text>
+<text x="199" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry types: stated</text>
+<text x="199" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">edges: stated</text>
+<text x="199" y="206" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: writer must support the spec</text>
+<rect x="416" y="58" width="330" height="168" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="581" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">plain WKB BINARY</text>
+<text x="581" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">encoding: inferred from bytes</text>
+<text x="581" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">CRS: unknown</text>
+<text x="581" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry types: unknown</text>
+<text x="581" y="178" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">edges: assumed planar</text>
+<text x="581" y="206" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">cost: the contract lives outside the file</text>
+</svg>
+</figure>
+
+The two "unknown" rows are the ones that turn into incidents. Encoding is recoverable — WKB has a recognisable byte-order flag and a small set of valid type codes, so a determined reader can work it out — but the coordinate reference system is not recoverable from the coordinates alone in any general way. Values between -180 and 180 are consistent with 4326, with 4258, with 4277 and with a dozen other systems whose datums differ by metres. Guessing produces data that is plausibly wrong.
+
+That asymmetry is why the recommendation lands where it does: use the plain binary column when the table is fully governed by a catalog that carries the CRS as a property and every consumer reaches the data through that catalog, and use GeoParquet metadata whenever files might be read directly, copied between buckets, handed to a partner, or archived. The second case is more common than teams expect, because it includes every incident investigation.
+
+## Measuring the Real Storage Difference
+
+The size argument between the two options is frequently overstated, and it is easy to settle empirically on your own data rather than accepting a general claim.
+
+<figure class="diagram">
+<svg viewBox="0 0 748 228" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Storage breakdown of a spatial Parquet file showing that the geometry payload dominates while the geo metadata block is a fixed few kilobytes regardless of row count">
+<rect x="0" y="0" width="748" height="228" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Where the bytes go in a 512 MB spatial file</text>
+<rect x="70" y="70" width="470" height="52" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="305" y="102" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">WKB geometry payload — ~78%</text>
+<rect x="540" y="70" width="118" height="52" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="599" y="102" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">attributes</text>
+<rect x="658" y="70" width="56" height="52" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="686" y="102" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">bbox</text>
+<rect x="714" y="70" width="12" height="52" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="720" y="152" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6a3d9a">geo</text>
+<text x="720" y="170" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6a3d9a">~4 KB</text>
+<text x="390" y="212" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">The metadata block does not scale with row count — its cost is a rounding error</text>
+</svg>
+</figure>
+
+The `geo` metadata is a few kilobytes per file no matter how many rows the file holds, so at any realistic file size it is invisible. The four bounding-box columns are a genuine cost — thirty-two bytes per row before compression, though they compress extremely well because neighbouring rows in a sorted file have near-identical bounds — and they are worth it in every case where the table is queried by location, which is the entire premise of storing it here.
+
 ## Common errors and fixes
 
 | Error | Cause | Fix |
@@ -123,13 +175,13 @@ print("geo_native self-describes CRS:", a.crs is not None)
 ## Storage layout compared
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Side by side comparison of a GeoParquet-native geometry column with geo metadata versus a plain WKB binary column with hand-rolled bbox columns">
+<svg viewBox="0 0 752 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Side by side comparison of a GeoParquet-native geometry column with geo metadata versus a plain WKB binary column with hand-rolled bbox columns">
 <title>GeoParquet-native vs raw WKB layout</title>
 <desc>Left: a file with a WKB column, a bbox struct, and a geo footer holding CRS and covering. Right: a file with a WKB binary column and four flat bbox double columns but no geo footer, requiring external CRS knowledge.</desc>
 <defs>
 <marker id="arw-trade" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#6a3d9a"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="752" height="240" fill="#f7fbfc"/>
 <rect x="20" y="24" width="340" height="204" rx="6" fill="#ffffff" stroke="#cfe3e7"/>
 <text x="190" y="46" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#0d3b45">Option A — GeoParquet-native</text>
 <rect x="38" y="58" width="304" height="34" rx="3" fill="#ffffff" stroke="#0e6e7d"/>
@@ -155,3 +207,11 @@ print("geo_native self-describes CRS:", a.crs is not None)
 </figure>
 
 For the full specification of the metadata Option A writes, return to [GeoParquet encoding standards](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/); to keep either layout honest in a pipeline, wire up [validating GeoParquet metadata in CI](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/). The authoritative field definitions live in the [GeoParquet specification](https://geoparquet.org/releases/v1.1.0/) and the [OGC Simple Features Access](https://www.ogc.org/standard/sfa/) standard.
+
+## Choosing Once, Per Table
+
+Resist the temptation to decide per pipeline. A platform where some spatial tables are self-describing and others are not forces every consumer to handle both cases, which in practice means every consumer handles the simpler case and quietly mishandles the other. Pick one convention, apply it to every spatial table, and make the exception require a written justification. The convention that ages best for most teams is self-describing files everywhere, on the grounds that the marginal cost is a few kilobytes per file and the marginal benefit is that no future reader has to guess. Where a governed catalog genuinely is the only access path — a closed platform, a single engine, strong controls on direct object access — the plain binary column is defensible and slightly cheaper; just write down which regime the table is in.
+
+Whichever regime applies, the derived bounding-box columns are not part of the trade-off and should be present either way. They are what makes location a first-class predicate for the query planner, they are independent of how the geometry itself is encoded, and their cost is small enough to be uninteresting next to the scan they eliminate.
+
+Record the choice as a table property so a reader never has to infer it from the bytes, and revisit it only when the access pattern changes rather than when a new pipeline is written.

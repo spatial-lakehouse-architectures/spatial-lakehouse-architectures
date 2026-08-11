@@ -1,6 +1,28 @@
 (function () {
   "use strict";
 
+  // -------- Theme toggle --------
+  const root = document.documentElement;
+  const themeToggle = document.querySelector(".theme-toggle");
+  if (themeToggle) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+    const current = () => root.getAttribute("data-theme") || (systemDark.matches ? "dark" : "light");
+    const sync = () => {
+      const dark = current() === "dark";
+      themeToggle.setAttribute("aria-pressed", String(dark));
+      themeToggle.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+    };
+    sync();
+    themeToggle.addEventListener("click", () => {
+      const next = current() === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("theme", next); } catch (_) {}
+      sync();
+    });
+    // Follow the OS while the reader has expressed no preference of their own.
+    systemDark.addEventListener("change", () => { if (!root.getAttribute("data-theme")) sync(); });
+  }
+
   // -------- Mobile nav --------
   const navToggle = document.querySelector(".nav-toggle");
   const nav = document.getElementById("primary-nav");
@@ -71,31 +93,6 @@
       if (li) li.classList.toggle("is-checked", cb.checked);
     });
   });
-
-  // -------- Mermaid runtime --------
-  const mermaidNodes = document.querySelectorAll("pre.mermaid");
-  if (mermaidNodes.length > 0) {
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
-    s.onload = () => {
-      if (!window.mermaid) return;
-      window.mermaid.initialize({
-        startOnLoad: false,
-        theme: "base",
-        themeVariables: {
-          primaryColor: "#d8eff2",
-          primaryTextColor: "#1d2a33",
-          primaryBorderColor: "#0e6e7d",
-          lineColor: "#0e6e7d",
-          secondaryColor: "#f1c560",
-          tertiaryColor: "#7ec48b",
-          fontFamily: 'Inter, system-ui, sans-serif',
-        },
-      });
-      window.mermaid.run({ nodes: mermaidNodes });
-    };
-    document.head.appendChild(s);
-  }
 
   // -------- Service worker --------
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {

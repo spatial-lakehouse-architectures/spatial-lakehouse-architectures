@@ -3,11 +3,11 @@
 DuckDB turns a laptop or a single warehouse node into a capable spatial query engine that reads GeoParquet and Apache Iceberg data straight from object storage, with no cluster to provision and no JVM to tune. Its `spatial` extension ships an R-tree index, a GEOS-backed predicate library, and native GeoParquet readers, while the `httpfs` and `iceberg` extensions let it pull byte ranges directly from S3. For data engineers who spend their day inside a distributed lakehouse but need fast, interactive spatial exploration — ad-hoc `ST_Intersects` filters, tile validation, or pre-aggregation before a heavier job — an embedded engine removes an enormous amount of operational friction. This topic area sits inside [Spatial Query Engines & Compute Optimization](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/) and covers when single-node DuckDB is the right tool, how to wire it to lakehouse storage, and how to keep spatial joins fast when the working set outgrows memory.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DuckDB single-node engine reading GeoParquet and Iceberg from object storage through httpfs with an in-process R-tree">
+<svg viewBox="0 0 742 294" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DuckDB single-node engine reading GeoParquet and Iceberg from object storage through httpfs with an in-process R-tree">
 <defs>
 <marker id="arw-duckdb-cluster" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="300" fill="#f7fbfc"/>
+<rect x="0" y="0" width="742" height="294" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">DuckDB embedded spatial engine over lakehouse storage</text>
 <text x="130" y="60" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#33707d">Object storage (S3)</text>
 <rect x="30" y="72" width="200" height="60" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
@@ -210,3 +210,90 @@ For raw scan throughput, prefer numeric bbox predicates over geometry predicates
 | GeoParquet reads but `geom` is `BLOB`, `ST_*` errors | Column still raw WKB, not decoded to GEOMETRY | Wrap with `ST_GeomFromWKB(geometry)`; confirm the file's `geo` metadata declares WKB encoding |
 
 DuckDB's spatial engine rewards a workflow of prune-then-refine: filter on bbox statistics, decode only what survives, and index anything you join repeatedly. Wired to GeoParquet and Iceberg through `httpfs`, it gives interactive spatial SQL over the same lakehouse tables your distributed jobs write — without a Spark cluster in the loop. For the authoritative function reference and extension internals, consult the official [DuckDB spatial extension documentation](https://duckdb.org/docs/stable/extensions/spatial/overview) and the [GeoParquet specification](https://geoparquet.org/releases/v1.1.0/); for the geometry predicate semantics themselves, the [OGC Simple Features standard](https://www.ogc.org/standards/sfa/) is the source of record.
+
+## The Single-Node Ceiling, Measured
+
+The interesting question about DuckDB on lakehouse data is never whether it works but where it stops working, and the boundary is higher and more specific than most teams assume.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 246" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three regimes for DuckDB on spatial data: comfortable where the working set fits in memory, workable where it spills to local disk, and unsuitable where the join itself exceeds the node">
+<rect x="0" y="0" width="764" height="246" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three regimes, and what decides which one you are in</text>
+<rect x="26" y="58" width="230" height="176" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="141" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">comfortable</text>
+<text x="141" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">working set &lt; memory</text>
+<text x="141" y="144" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">filters, aggregations,</text>
+<text x="141" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">joins to a small side</text>
+<text x="141" y="194" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">often 50–150 GB scanned</text>
+<text x="141" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">seconds to a minute</text>
+<rect x="274" y="58" width="230" height="176" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0e6e7d">workable</text>
+<text x="389" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">spills to local NVMe</text>
+<text x="389" y="144" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">large sorts, wide</text>
+<text x="389" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">aggregations</text>
+<text x="389" y="194" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">set a temp directory</text>
+<text x="389" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">minutes, still cheaper than a cluster</text>
+<rect x="522" y="58" width="230" height="176" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">unsuitable</text>
+<text x="637" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">the join itself is too big</text>
+<text x="637" y="144" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">large-versus-large</text>
+<text x="637" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">spatial joins</text>
+<text x="637" y="194" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">full-table rewrites</text>
+<text x="637" y="216" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">move it to Sedona</text>
+</svg>
+</figure>
+
+The distinction that matters is between **bytes scanned** and **working set**. A query that scans a terabyte and returns an aggregate over a few thousand groups has a tiny working set and runs comfortably; a query that scans a hundred gigabytes and needs a hash table over all of it does not. Sizing by scanned volume alone consistently misjudges the boundary in both directions.
+
+Spilling deserves a specific note because its behaviour depends entirely on the storage underneath. On local NVMe, a spilled sort is slower but perfectly usable; on network-attached storage it is dramatically worse and frequently slower than moving the workload to a cluster. Set the temporary directory explicitly to fast local storage rather than accepting whatever the default is, and measure once with a deliberately oversized query so the behaviour is known before it matters.
+
+## Reading Lakehouse Tables Rather Than Files
+
+<figure class="diagram">
+<svg viewBox="0 0 762 234" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two access paths from DuckDB to lakehouse data: reading Parquet paths directly which is simple but ignores table semantics, and going through the table format so snapshots, deletes and partition pruning are respected">
+<rect x="0" y="0" width="762" height="234" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two ways in, with different guarantees</text>
+<rect x="30" y="58" width="352" height="164" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">read_parquet on a glob</text>
+<text x="206" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">simple, works everywhere</text>
+<text x="206" y="144" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ignores snapshots</text>
+<text x="206" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ignores delete files</text>
+<text x="206" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">may read files mid-commit</text>
+<text x="206" y="212" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">fine for a static export, not a live table</text>
+<rect x="398" y="58" width="352" height="164" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="574" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">through the table format</text>
+<text x="574" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">extension, or a planned file list</text>
+<text x="574" y="144" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">a consistent snapshot</text>
+<text x="574" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">deletes applied</text>
+<text x="574" y="188" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">partitions pruned by the planner</text>
+<text x="574" y="212" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">the correct default</text>
+</svg>
+</figure>
+
+The glob path is seductive because it is one line and it works — until a compaction runs during a query and the file list changes underneath, or until the table adopts merge-on-read and deleted rows start appearing in results. Neither failure is loud, and the second is the sort of thing that gets noticed in a report rather than in a log.
+
+Where a native extension is unavailable, the planned-file-list pattern gives the same guarantees: have the table format resolve a snapshot and a pruned file list, then hand those exact paths to DuckDB. It is a few more lines and it keeps the correctness properties that make a lakehouse worth having.
+
+## Operating DuckDB as a Service Component
+
+Because DuckDB is a library, running it as part of a platform means making decisions that a server would otherwise make for you.
+
+**Process management.** Each concurrent query needs its own process if it needs its own memory budget, so a serving tier needs a pool and an admission policy. Without one, ten simultaneous requests split the machine's memory ten ways and all of them spill. A small queue with a bounded worker count is almost always better than unbounded concurrency.
+
+**Memory limits.** Set `memory_limit` explicitly rather than letting it default to a fraction of system memory, particularly in containers where the detected total may be the host's rather than the container's. An unbounded process in a container is killed by the orchestrator rather than spilling, which turns a slow query into a restart.
+
+**Extension loading.** Loading the spatial extension takes a moment and downloading it takes longer. Bake extensions into the image rather than installing at runtime, so a network hiccup does not turn into a failed query, and so an air-gapped deployment works at all.
+
+**Credential lifetime.** Object-storage credentials configured at connection time do not refresh. A long-lived process needs to re-create its secret before expiry, and the failure otherwise appears as an authorisation error in the middle of a working day with no deployment to blame.
+
+None of this is difficult, and all of it is the kind of thing that is discovered in production if it is not decided in advance. The reason it is worth the paragraph is that DuckDB's ease of use makes it easy to reach production without anyone having made these decisions at all — which is exactly when the first incident arrives.
+
+For the two most common concrete tasks — an indexed intersection join over GeoParquet, and reading a governed Iceberg table — see [how to run ST_Intersects in DuckDB on GeoParquet](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/how-to-run-st-intersects-in-duckdb-on-geoparquet/) and [querying Iceberg tables with the DuckDB spatial extension](https://www.spatial-lakehouse-architectures.org/spatial-query-engines-compute/duckdb-geospatial-analytics/querying-iceberg-tables-with-duckdb-spatial-extension/). Both assume the operational decisions above are already made.
+
+The recurring conclusion across both is that DuckDB's role in a lakehouse is not "the small option" — it is the right option for a surprisingly wide band of work, provided somebody has decided how it is bounded, how it authenticates, and how it reads the table rather than the files.
+Decided in advance, those three questions take an afternoon; discovered in production, they take an incident review.
+The engine is easy; the operating envelope is the part that needs designing.
+Everything else follows from those three answers.
+The rest is ordinary SQL against ordinary Parquet, which is precisely the appeal.
+That is the summary: bound it, authenticate it, and read the table rather than the files.
+None of the three is difficult; all three are silent when skipped.

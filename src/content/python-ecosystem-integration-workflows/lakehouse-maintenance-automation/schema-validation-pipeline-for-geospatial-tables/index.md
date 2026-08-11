@@ -191,12 +191,12 @@ except SchemaViolation as exc:
 ```
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Staged batch passing through four validation checks into the table or rejected to CI failure">
+<svg viewBox="0 0 742 244" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Staged batch passing through four validation checks into the table or rejected to CI failure">
 <defs>
 <marker id="arw-geo-val" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
 <marker id="arw-geo-val-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#9a5a17"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="742" height="244" fill="#f7fbfc"/>
 <text x="380" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Pre-write geospatial schema gate</text>
 <rect x="20" y="95" width="130" height="60" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
 <text x="85" y="122" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#0d3b45">staged batch</text>
@@ -221,3 +221,68 @@ except SchemaViolation as exc:
 </figure>
 
 Once a batch passes the gate and is written, the ongoing maintenance in [compacting spatial Iceberg tables with rewrite_data_files](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/compacting-spatial-iceberg-tables-with-rewrite-data-files/) and [scheduling VACUUM for spatial Delta tables](https://www.spatial-lakehouse-architectures.org/python-ecosystem-integration-workflows/lakehouse-maintenance-automation/scheduling-vacuum-for-spatial-delta-tables/) keeps it healthy. The authoritative references for the underlying contracts are the [PyArrow schema and metadata API](https://arrow.apache.org/docs/python/generated/pyarrow.Schema.html) and the [OGC GeoParquet specification](https://geoparquet.org/releases/v1.0.0/) that standardizes the geometry column and CRS metadata this gate enforces.
+
+## What a Spatial Schema Check Must Cover
+
+A generic schema validator checks column names and types. A spatial one has to check several properties that no type system expresses.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six spatial schema properties to validate: geometry encoding, coordinate reference system, dimensionality, bounding box columns present and inside the statistics window, partition derivation version, and geometry validity">
+<rect x="0" y="0" width="764" height="280" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Six properties a type system cannot express</text>
+<rect x="26" y="56" width="230" height="98" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="141" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">encoding</text>
+<text x="141" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">WKB, not WKT or GeoJSON</text>
+<text x="141" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">check the byte-order flag</text>
+<rect x="274" y="56" width="230" height="98" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="389" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">coordinate system</text>
+<text x="389" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">declared and consistent</text>
+<text x="389" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">ranges must agree with it</text>
+<rect x="522" y="56" width="230" height="98" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="84" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">dimensionality</text>
+<text x="637" y="108" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">2D or 3D, not both</text>
+<text x="637" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">mixed columns behave oddly</text>
+<rect x="26" y="170" width="230" height="98" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="141" y="198" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">bbox columns</text>
+<text x="141" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">present, typed, positioned</text>
+<text x="141" y="244" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">inside the statistics window</text>
+<rect x="274" y="170" width="230" height="98" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="198" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">derivation version</text>
+<text x="389" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">grid library version recorded</text>
+<text x="389" y="244" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">so an upgrade is visible</text>
+<rect x="522" y="170" width="230" height="98" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="637" y="198" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">geometry validity</text>
+<text x="637" y="222" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">no self-intersections</text>
+<text x="637" y="244" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">sampled, not exhaustive</text>
+</svg>
+</figure>
+
+The bottom-right check is the only one that needs to read data, and sampling is sufficient: a thousand rows will find a systematic validity problem, and an exhaustive check on a billion-row table is a job rather than a gate. Everything else is metadata, which is why the whole validation runs in seconds regardless of table size.
+
+## Where the Gate Belongs in the Pipeline
+
+<figure class="diagram">
+<svg viewBox="0 0 758 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two gate positions: a pull request check on the schema definition, and a pre-publish check on written data before it is promoted from staging">
+<defs>
+<marker id="svp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="758" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two gates, catching two different mistakes</text>
+<rect x="34" y="68" width="200" height="76" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="134" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">pull request</text>
+<text x="134" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">the declaration changed</text>
+<rect x="290" y="68" width="200" height="76" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="390" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">write to staging</text>
+<text x="390" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">real data, real metadata</text>
+<rect x="546" y="68" width="200" height="76" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="646" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">promote</text>
+<text x="646" y="122" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">only if the gate passed</text>
+<line x1="234" y1="106" x2="290" y2="106" stroke="#0e6e7d" stroke-width="2" marker-end="url(#svp-arrow)"/>
+<line x1="490" y1="106" x2="546" y2="106" stroke="#0e6e7d" stroke-width="2" marker-end="url(#svp-arrow)"/>
+<text x="390" y="186" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">The first catches intent; the second catches what actually happened</text>
+</svg>
+</figure>
+
+Both are needed. A pull-request check on the schema definition catches a developer removing a bounding-box column or changing a CRS deliberately without realising the consequences. A pre-publish check on written data catches the cases where the code was right and the outcome was not — a statistics limit exceeded, a library that behaved differently, a source whose coordinates changed. Neither substitutes for the other.
+
+Run both gates on every table rather than on the ones that seem important. The tables that cause incidents are consistently the ones nobody was watching, written by a pipeline that predates the convention, and a catalogue-wide sweep finds them in minutes.

@@ -147,10 +147,10 @@ print("H3", h, "| S2", tok, "| geohash", gh)
 ```
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bar comparison of partition cardinality and skew for H3, S2 and geohash on the same skewed point set">
+<svg viewBox="0 0 722 234" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bar comparison of partition cardinality and skew for H3, S2 and geohash on the same skewed point set">
 <title>Cardinality and skew per grid on a skewed point set</title>
 <desc>Three grouped bars showing that H3 and S2 produce moderate partition counts with low hot-partition skew, while geohash produces higher skew at a matched cell size.</desc>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="0" width="722" height="234" fill="#f7fbfc"/>
 <text x="380" y="26" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#0d3b45" font-weight="bold">Same points, three grids: cardinality vs hot-partition skew</text>
 <line x1="90" y1="200" x2="710" y2="200" stroke="#33707d" stroke-width="1.5"/>
 <line x1="90" y1="60" x2="90" y2="200" stroke="#33707d" stroke-width="1.5"/>
@@ -177,3 +177,68 @@ print("H3", h, "| S2", tok, "| geohash", gh)
 </figure>
 
 Once you have chosen a grid from this comparison, size its resolution against your data with the method in [choosing an H3 resolution for point data](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/grid-system-selection/choosing-h3-resolution-for-point-data/), and make sure the resulting key actually prunes by following [predicate pushdown optimization](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/predicate-pushdown-optimization/). External references: the [H3 documentation](https://h3geo.org/docs/) and the [S2 Geometry library](https://s2geometry.io/).
+
+## Identifier Structure and What It Enables
+
+The three systems differ most consequentially in how their identifiers are constructed, because the identifier is what the query planner actually manipulates.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Identifier structure of the three grid systems: geohash as a prefix string where a prefix match is a range scan, S2 as a 64 bit cell id along a Hilbert curve where a cell covers a contiguous integer range, and H3 as a 64 bit id encoding resolution and a digit path">
+<rect x="0" y="0" width="764" height="290" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Identifier structure decides what the planner can do</text>
+<rect x="26" y="56" width="726" height="66" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="42" y="82" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">geohash</text>
+<text x="150" y="82" font-family="sans-serif" font-size="11" fill="#33707d">base-32 string, &#8220;u33dbc&#8221; — a prefix is a parent</text>
+<text x="150" y="104" font-family="sans-serif" font-size="11" fill="#0d3b45">enables: LIKE &#8216;u33%&#8217; as a range scan · costs: string column, uneven cell shapes</text>
+<rect x="26" y="134" width="726" height="66" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="42" y="160" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">S2</text>
+<text x="150" y="160" font-family="sans-serif" font-size="11" fill="#33707d">64-bit id ordered along a Hilbert curve</text>
+<text x="150" y="182" font-family="sans-serif" font-size="11" fill="#0d3b45">enables: a region becomes a few integer BETWEEN ranges · costs: cell area varies by face</text>
+<rect x="26" y="212" width="726" height="66" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="42" y="238" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">H3</text>
+<text x="150" y="238" font-family="sans-serif" font-size="11" fill="#33707d">64-bit id encoding resolution plus a digit path</text>
+<text x="150" y="260" font-family="sans-serif" font-size="11" fill="#0d3b45">enables: IN list of cells, uniform neighbours · costs: no contiguous range for a region</text>
+</svg>
+</figure>
+
+The difference between a **range** and an **IN list** is the practical crux. S2's Hilbert ordering means a contiguous region maps to a small number of integer ranges, which every query planner handles natively and which prunes beautifully on min/max statistics. H3 produces a set of unordered identifiers, so a region becomes an `IN` list — perfectly workable, and prunes well on partition values, but it does not benefit from range statistics inside a file the way an S2 range does.
+
+Geohash's string prefix property is genuinely convenient for debugging and for systems where a human reads the key, and it is the weakest of the three for a partitioned table: string comparison is slower, the column is larger, statistics are lexicographic, and the cells are rectangles in degree space with all the latitude distortion that implies.
+
+The choice therefore follows the pruning mechanism the table depends on. Tables that prune primarily by partition value do well with H3, whose uniform neighbours and clean resolution hierarchy make window expansion straightforward. Tables that prune primarily by within-file statistics do better with S2, because a range predicate is exactly what those statistics can evaluate. Tables where a human is expected to read the key are the case for geohash, and that case is rarer than its popularity suggests.
+
+## Library and Ecosystem Considerations
+
+Beyond the technical differences, the practical question of which library is already available in the stack decides more of these choices than anyone admits, and it is a legitimate criterion.
+
+All three systems have mature implementations in the languages that matter for a lakehouse — Java for Spark and Trino, Python for orchestration, Rust and C++ underneath both. Where they differ is in **engine-native availability**: some warehouses ship one system as built-in SQL functions and require a user-defined function for the others, and a built-in beats a UDF for both performance and for the optimiser's ability to reason about the expression. Check what the primary query engine exposes natively before choosing, because a partition key that requires a UDF on the query side is a partition key some callers will avoid.
+
+The second ecosystem consideration is **interoperability with data you receive**. Datasets published by others frequently carry a cell identifier already, and matching it avoids a re-derivation and a class of boundary mismatches. Mobility and telemetry datasets tend to arrive with H3; geospatial indexing systems originating from search and mapping infrastructure tend to use S2; and older or simpler publications use geohash. Where a substantial input already carries one, adopting it is usually cheaper than converting.
+
+The last consideration is one of longevity. All three are stable, well-specified and unlikely to disappear, so the risk is not abandonment but subtle change: a library release that alters a boundary assignment, or a new version that changes a default. Pin the library version, record it alongside the data as described earlier, and treat an upgrade as a change that needs a fixed-coordinate test rather than as a routine dependency bump. That discipline matters more than the system chosen, because it is what makes the identifier a stable fact rather than a computation that happens to agree with itself today.
+
+## A Short Verdict
+
+<figure class="diagram">
+<svg viewBox="0 0 764 198" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Recommendation summary: H3 as the default for partition value pruning and uniform analysis cells, S2 where range statistics drive pruning, and geohash where a readable key matters most">
+<rect x="0" y="0" width="764" height="198" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Pick by pruning mechanism, not by popularity</text>
+<rect x="26" y="58" width="230" height="128" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2.5"/>
+<text x="141" y="88" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">H3</text>
+<text x="141" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">default choice</text>
+<text x="141" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">partition-value pruning,</text>
+<text x="141" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">uniform analysis cells</text>
+<rect x="274" y="58" width="230" height="128" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="88" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">S2</text>
+<text x="389" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">range-statistics pruning</text>
+<text x="389" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">unpartitioned tables,</text>
+<text x="389" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">sort-order-driven layouts</text>
+<rect x="522" y="58" width="230" height="128" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="637" y="88" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#0d3b45">geohash</text>
+<text x="637" y="116" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">human-readable keys</text>
+<text x="637" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">debugging, interchange,</text>
+<text x="637" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">legacy compatibility</text>
+</svg>
+</figure>
+
+None of these is a mistake, and a platform running two of them for different tables is normal rather than untidy. What does cause trouble is running two on the *same* table without saying so, or converting between them implicitly in a pipeline — so whichever is chosen, name the column after it and keep the derivation in one place.

@@ -120,6 +120,65 @@ if __name__ == "__main__":
 5. **The degenerate-extent heuristic.** The subtler failure is projected coordinates that happen to be small — or a local grid whose values do fall under 180. `_degenerate_extent` flags a multi-row batch whose entire spatial span collapses to under a micro-degree, which real geographic data covering an actual area never does. It is a heuristic, so it is scoped to `len(gdf) > 1` to avoid false-positives on single-point batches.
 6. **Structured failure.** `guard_batch` emits a machine-readable drift event (for your log pipeline or alerting) *before* raising, so the alert carries the declared EPSG, the observed bounds, and the human-readable reasons. `raise_if_drift` then stops the pipeline so no drifted batch reaches the table.
 
+## What Drift Looks Like in the Numbers
+
+Drift is easiest to catch when you know its signature. Three of the four common shapes are visible in the batch's coordinate summary alone, with no reference data and no geometry library.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four coordinate drift signatures shown as value ranges: a projected CRS mislabelled as geographic, axis order swapped, a small datum shift, and a unit change from degrees to radians">
+<rect x="0" y="0" width="762" height="280" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Four drift signatures, read straight from the coordinate summary</text>
+<rect x="30" y="56" width="352" height="98" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="206" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">projected data labelled 4326</text>
+<text x="206" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">x range: 1 490 000 … 1 495 000</text>
+<text x="206" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">magnitude far outside ±180 — unmissable</text>
+<rect x="398" y="56" width="352" height="98" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="574" y="82" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">axis order swapped</text>
+<text x="574" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">x range: 47 … 55, y range: 5 … 15</text>
+<text x="574" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">both in range; extent lands in the wrong place</text>
+<rect x="30" y="170" width="352" height="98" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="196" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">datum shift</text>
+<text x="206" y="220" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">every point moved 0.7 … 3 m</text>
+<text x="206" y="242" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">invisible in ranges — needs control points</text>
+<rect x="398" y="170" width="352" height="98" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="574" y="196" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">degrees read as radians</text>
+<text x="574" y="220" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">x range: 0.10 … 0.26</text>
+<text x="574" y="242" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6a3d9a">in range, but the extent collapses to a point</text>
+</svg>
+</figure>
+
+The axis-order case is the one that most often survives a naive check, because latitude and longitude values in central Europe overlap in magnitude and both remain inside the valid geographic range. The extent test catches it — a batch that should sit around 10°E, 51°N and instead reports 51°E, 10°N has escaped its expected area by thousands of kilometres — which is the reason the extent assertion is worth having even after the range assertion passes.
+
+The radians case looks absurd until it happens, and it happens whenever a source system exports from a library whose trigonometric internals leak. Its signature is distinctive: valid-looking values whose total extent is roughly one fifty-seventh of the expected one. An extent that has shrunk by a factor near 57.3 is radians, not a data quality problem.
+
+## Alerting Without Drowning in False Positives
+
+A drift detector that fires on every unusual batch gets muted within a fortnight. The tuning that keeps it useful separates the checks by confidence and routes them differently.
+
+<figure class="diagram">
+<svg viewBox="0 0 764 204" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three response tiers for drift checks: hard failure for impossible coordinates, quarantine for suspicious extents, and a logged metric for small displacements">
+<rect x="0" y="0" width="764" height="204" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Match the response to the confidence of the signal</text>
+<rect x="26" y="60" width="230" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="141" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#9a5a17">fail the write</text>
+<text x="141" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">impossible coordinates</text>
+<text x="141" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">mixed SRIDs in one batch</text>
+<text x="141" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">no false positives possible</text>
+<rect x="274" y="60" width="230" height="132" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0e6e7d">quarantine</text>
+<text x="389" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">extent outside expected area</text>
+<text x="389" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">extent collapsed or exploded</text>
+<text x="389" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">legitimate expansion happens</text>
+<rect x="522" y="60" width="230" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="637" y="88" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#2f6e49">record a metric</text>
+<text x="637" y="114" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">control-point displacement</text>
+<text x="637" y="136" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">vertex-count distribution</text>
+<text x="637" y="164" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">alert on trend, not on one batch</text>
+</svg>
+</figure>
+
+Quarantine rather than rejection is the right response to a suspicious extent, because a supplier genuinely does expand into a new region occasionally. Land the batch in a side table, alert once, and give an operator a one-command promotion path. The failure mode to avoid is a pipeline that halts overnight for a legitimate expansion, because the next response is invariably to widen the threshold until the check stops meaning anything.
+
 ## Common errors and fixes
 
 | Error | Cause | Fix |
@@ -156,7 +215,7 @@ print("drift detector verified")
 Wire `guard_batch` into the ingestion stage of your [CRS management pipeline](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/) so every batch is cross-examined before write, and record the observed bounds per batch so a slow drift trend is visible over time. Pair it with the metadata assertions in [Validating GeoParquet metadata in CI](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/) and the [GeoParquet encoding standards](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/) so both the declared CRS metadata and the coordinate evidence are checked on the same boundary.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Drift detection logic comparing declared CRS against observed coordinate bounds to reach a pass or fail verdict">
+<svg viewBox="0 0 760 218" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Drift detection logic comparing declared CRS against observed coordinate bounds to reach a pass or fail verdict">
 <title>CRS drift detection decision flow</title>
 <desc>A batch's declared CRS and its observed coordinate bounds are checked independently; agreement passes to write, disagreement is flagged as drift and quarantined.</desc>
 <defs>
@@ -164,7 +223,7 @@ Wire `guard_batch` into the ingestion stage of your [CRS management pipeline](ht
 <path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/>
 </marker>
 </defs>
-<rect x="0" y="0" width="760" height="240" fill="#f7fbfc"/>
+<rect x="0" y="0" width="760" height="218" fill="#f7fbfc"/>
 <rect x="20" y="94" width="130" height="52" rx="6" fill="#ffffff" stroke="#cfe3e7" stroke-width="1.5"/>
 <text x="85" y="116" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#0d3b45">Incoming batch</text>
 <text x="85" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">declared + geom</text>
@@ -191,3 +250,7 @@ Wire `guard_batch` into the ingestion stage of your [CRS management pipeline](ht
 <line x1="580" y1="132" x2="624" y2="160" stroke="#9a5a17" stroke-width="2" marker-end="url(#arw-crsdrift)"/>
 </svg>
 </figure>
+
+## Keeping the Detector Honest Over Time
+
+A detector tuned against last year's data slowly stops matching this year's. Two habits keep it accurate without constant attention. First, derive the expected extent from the data itself on a rolling basis — the ninety-fifth percentile of the last thirty accepted batches, widened by a margin — rather than hard-coding a bounding box that someone chose once. Second, keep the control points in a version-controlled file with a comment explaining where each came from, because a control point whose provenance is forgotten will eventually be "corrected" by someone who assumes it is wrong. Review both whenever a new source is onboarded, which is the only moment the expected behaviour genuinely changes.

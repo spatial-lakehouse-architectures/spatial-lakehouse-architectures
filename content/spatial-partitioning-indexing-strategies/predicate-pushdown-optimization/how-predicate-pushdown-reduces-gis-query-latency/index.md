@@ -143,3 +143,105 @@ Monitor manifest size. Target fewer than 500MB of manifest files per partition t
 5. Manifest parsing latency < 2s for tables > 100k files.
 
 Implementing these configurations eliminates compute-side geometry materialization. By translating spatial predicates into numeric range filters and aligning physical layout with query patterns, lakehouse architectures achieve deterministic sub-second latency on multi-terabyte GIS datasets.
+
+## The Latency Budget, Broken Down
+
+"Faster" is not a useful target. Breaking the latency of a spatial query into its constituent parts makes it obvious which optimisation is worth doing and which is noise.
+
+<figure class="diagram">
+<svg viewBox="0 0 765 288" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Latency breakdown of the same spatial query in two configurations, showing planning, storage requests, decode and predicate evaluation before and after materialising bounding box columns and sorting the table">
+<rect x="0" y="0" width="765" height="288" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Same query, same result, two layouts</text>
+<text x="72" y="72" font-family="sans-serif" font-size="12" font-weight="700" fill="#9a5a17">before: 42 s</text>
+<rect x="72" y="84" width="30" height="34" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<rect x="102" y="84" width="290" height="34" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<rect x="392" y="84" width="200" height="34" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<rect x="592" y="84" width="120" height="34" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="87" y="140" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#0d3b45">plan</text>
+<text x="247" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">storage reads</text>
+<text x="492" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">WKB decode</text>
+<text x="652" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">predicate</text>
+<text x="72" y="196" font-family="sans-serif" font-size="12" font-weight="700" fill="#2f6e49">after: 1.6 s</text>
+<rect x="72" y="208" width="34" height="34" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<rect x="106" y="208" width="66" height="34" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<rect x="172" y="208" width="42" height="34" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<rect x="214" y="208" width="26" height="34" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="390" y="232" font-family="sans-serif" font-size="11" fill="#3d5a63">the bars are to the same scale — the work itself disappeared</text>
+<text x="390" y="272" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Planning grew slightly; everything downstream of it collapsed</text>
+</svg>
+</figure>
+
+Two things in this breakdown are worth noticing. First, **planning time increases** when pushdown works, because the planner is now doing real work evaluating statistics against a predicate. That increase is trivial in absolute terms and is the price of everything else falling away — but it means "total planning time went up" is not, on its own, a regression.
+
+Second, decode and predicate evaluation shrink **proportionally** to the rows that survive, not to the bytes skipped. That is why materialising bounding-box columns helps even on a table that is already well partitioned: partition pruning removes files, and the numeric predicate removes rows within the files that remain, and the two compound.
+
+The practical target is that storage reads should dominate the profile of a well-tuned spatial query, and they should be small. A profile where decode dominates means rows are being decoded that a numeric predicate could have eliminated. A profile where planning dominates means too many partitions. A profile where the exact predicate dominates means the candidate set is too large, which is a join-strategy problem rather than a layout one.
+
+## Reading the Profile in Practice
+
+<figure class="diagram">
+<svg viewBox="0 0 766 254" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagnostic table mapping the dominant phase of a query profile to its likely cause and the corresponding fix">
+<rect x="0" y="0" width="766" height="254" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Dominant phase &#8594; likely cause &#8594; fix</text>
+<rect x="26" y="52" width="200" height="34" rx="6" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="126" y="75" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">dominant phase</text>
+<rect x="234" y="52" width="250" height="34" rx="6" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="359" y="75" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">cause</text>
+<rect x="492" y="52" width="262" height="34" rx="6" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="623" y="75" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">fix</text>
+<text x="36" y="114" font-family="sans-serif" font-size="12" fill="#0d3b45">planning</text>
+<text x="244" y="114" font-family="sans-serif" font-size="12" fill="#33707d">too many partitions</text>
+<text x="502" y="114" font-family="sans-serif" font-size="12" fill="#2f6e49">coarsen the partition key</text>
+<line x1="26" y1="128" x2="754" y2="128" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="36" y="156" font-family="sans-serif" font-size="12" fill="#0d3b45">storage reads</text>
+<text x="244" y="156" font-family="sans-serif" font-size="12" fill="#33707d">files not pruned</text>
+<text x="502" y="156" font-family="sans-serif" font-size="12" fill="#2f6e49">add the bbox predicate</text>
+<line x1="26" y1="170" x2="754" y2="170" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="36" y="198" font-family="sans-serif" font-size="12" fill="#0d3b45">decode</text>
+<text x="244" y="198" font-family="sans-serif" font-size="12" fill="#33707d">rows survive that should not</text>
+<text x="502" y="198" font-family="sans-serif" font-size="12" fill="#2f6e49">sort the files; check statistics</text>
+<line x1="26" y1="212" x2="754" y2="212" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="36" y="238" font-family="sans-serif" font-size="12" fill="#0d3b45">exact predicate</text>
+<text x="244" y="238" font-family="sans-serif" font-size="12" fill="#33707d">candidate set too large</text>
+<text x="502" y="238" font-family="sans-serif" font-size="12" fill="#2f6e49">change the join strategy</text>
+</svg>
+</figure>
+
+Work the table top to bottom. Each row's fix is cheaper than the one below it, and fixing a lower row while an upper one is still dominant produces an improvement too small to measure — which is the usual reason a tuning effort feels unproductive.
+
+## What Pushdown Cannot Fix
+
+<figure class="diagram">
+<svg viewBox="0 0 764 202" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three query shapes that pushdown cannot accelerate: an aggregation over the whole extent, a join whose candidate set is genuinely large, and a query whose selectivity is low because the data really is everywhere the filter looks">
+<rect x="0" y="0" width="764" height="202" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three cases where the answer is not more pruning</text>
+<rect x="26" y="58" width="230" height="132" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="141" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">global aggregation</text>
+<text x="141" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">&#8220;count by region, worldwide&#8221;</text>
+<text x="141" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">every file is genuinely needed</text>
+<text x="141" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">fix: pre-aggregate</text>
+<rect x="274" y="58" width="230" height="132" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="389" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">large genuine candidate set</text>
+<text x="389" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">dense points, dense polygons</text>
+<text x="389" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">the pairs really do overlap</text>
+<text x="389" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">fix: join strategy, more compute</text>
+<rect x="522" y="58" width="230" height="132" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="637" y="86" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">low selectivity by nature</text>
+<text x="637" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">the window covers most data</text>
+<text x="637" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">nothing to skip</text>
+<text x="637" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">fix: narrow the question</text>
+</svg>
+</figure>
+
+Recognising these early saves a lot of wasted tuning. A query that legitimately needs most of the table is not a pushdown failure, and no layout change will help it — the answer is either a pre-computed aggregate, more compute, or a conversation about whether the question can be narrowed. The distinguishing test is simple: compare the bytes read against the bytes the answer actually depends on. When the ratio is close to one, the query is already optimal and the remaining cost is real work.
+
+## Summary
+
+Pushdown for spatial queries is not a feature to enable; it is a property that emerges when three things are true at once. The table carries numeric columns that describe where each row is. Those columns have statistics the planner can read. And the query mentions them, so the planner has something to compare against. Remove any one and the mechanism disappears silently, leaving a query that returns correct answers at full-scan cost. The measurements described above exist to tell you which of the three has gone missing, and the ordering of the fixes exists because working them out of order produces improvements too small to notice. Everything else — engine selection, cluster sizing, cache warming — moves the numbers by tens of percent, while this moves them by orders of magnitude.
+ Do the layout work first, every time, and measure it before touching anything else.
+
+For the layout mechanics behind each of these fixes, see [spatial partitioning schemes](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/spatial-partitioning-schemes/) for key selection and [Z-ordering for geospatial queries](https://www.spatial-lakehouse-architectures.org/spatial-partitioning-indexing-strategies/z-ordering-for-geospatial-queries/) for the sort order that makes within-file statistics useful.
+
+Both are prerequisites rather than alternatives: the sort order is what makes file statistics tight enough to be worth consulting, and the partition key is what keeps the number of files small enough for the planner to consult them quickly.
+
+Neither one alone produces the collapse in latency shown above; together they routinely do.

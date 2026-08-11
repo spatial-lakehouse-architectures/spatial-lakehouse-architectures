@@ -19,13 +19,13 @@ Reach for file-level metadata when the same physical files are read by heterogen
 ## Architecture: what lives inside a GeoParquet file
 
 <figure class="diagram">
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of a GeoParquet file showing row groups, per-column bbox covering, and the file-level geo metadata block read by engines">
+<svg viewBox="0 0 752 282" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of a GeoParquet file showing row groups, per-column bbox covering, and the file-level geo metadata block read by engines">
 <title>GeoParquet 1.1 file layout</title>
 <desc>A Parquet file with two row groups, each holding a WKB geometry column and a bbox covering struct, and a file footer whose key-value metadata carries the geo block with version, primary_column, columns, CRS as PROJJSON, and covering. Engines read the footer first.</desc>
 <defs>
 <marker id="arw-geopq" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="300" fill="#f7fbfc"/>
+<rect x="0" y="0" width="752" height="282" fill="#f7fbfc"/>
 <rect x="20" y="30" width="330" height="240" rx="6" fill="#ffffff" stroke="#cfe3e7"/>
 <text x="185" y="52" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="bold" fill="#0d3b45">Parquet data (.parquet)</text>
 <rect x="38" y="66" width="294" height="86" rx="4" fill="#f7fbfc" stroke="#cfe3e7"/>
@@ -63,6 +63,54 @@ Reach for file-level metadata when the same physical files are read by heterogen
 </figure>
 
 A GeoParquet file is a normal Parquet file plus a JSON document stored under the key `geo` in the file footer's key-value metadata. Every compliant reader opens the footer, parses that JSON, and only then knows how to interpret the geometry column. The document has a `version`, a `primary_column` naming the default geometry column, and a `columns` map. Each entry in `columns` describes one geometry column: its `encoding` (`WKB` in 1.0, or `point`/`linestring`/other native GeoArrow encodings added in 1.1), its `geometry_types` array, its `crs` as a PROJJSON object, and — the headline 1.1 feature — an optional `covering` field that points at a per-row bounding-box struct column engines can use for file and row-group skipping.
+
+## Encoding Choices Inside the Geometry Column
+
+The GeoParquet specification allows more than one physical encoding, and the choice has measurable consequences for file size, decode cost and which engines can read the column without a conversion step.
+
+<figure class="diagram">
+<svg viewBox="0 0 758 304" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comparison of WKB, GeoArrow and WKT encodings for a geometry column across four criteria: relative size on disk, decode cost per row, engine support breadth and human readability">
+<rect x="0" y="0" width="758" height="304" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three encodings for the same polygon column</text>
+<rect x="34" y="56" width="146" height="34" rx="6" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="107" y="79" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">criterion</text>
+<rect x="188" y="56" width="182" height="34" rx="6" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="279" y="79" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">WKB (default)</text>
+<rect x="378" y="56" width="182" height="34" rx="6" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="469" y="79" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">GeoArrow</text>
+<rect x="568" y="56" width="178" height="34" rx="6" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="657" y="79" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">WKT</text>
+<text x="44" y="122" font-family="sans-serif" font-size="12" fill="#0d3b45">size on disk</text>
+<text x="279" y="122" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">baseline (1.0×)</text>
+<text x="469" y="122" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#2f6e49">0.7–0.9× compressed</text>
+<text x="657" y="122" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#9a5a17">1.8–2.4×</text>
+<line x1="34" y1="136" x2="746" y2="136" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="44" y="164" font-family="sans-serif" font-size="12" fill="#0d3b45">decode per row</text>
+<text x="279" y="164" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">parse header + coords</text>
+<text x="469" y="164" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#2f6e49">zero-copy to buffers</text>
+<text x="657" y="164" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#9a5a17">text parse (slowest)</text>
+<line x1="34" y1="178" x2="746" y2="178" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="44" y="206" font-family="sans-serif" font-size="12" fill="#0d3b45">engine support</text>
+<text x="279" y="206" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#2f6e49">universal</text>
+<text x="469" y="206" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#9a5a17">growing, not universal</text>
+<text x="657" y="206" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">universal but rare</text>
+<line x1="34" y1="220" x2="746" y2="220" stroke="#cfe3e7" stroke-width="1.5"/>
+<text x="44" y="248" font-family="sans-serif" font-size="12" fill="#0d3b45">best used for</text>
+<text x="279" y="248" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">the stored table</text>
+<text x="469" y="248" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">in-memory interchange</text>
+<text x="657" y="248" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#33707d">debugging only</text>
+<text x="390" y="288" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Store WKB, hand off GeoArrow between processes, never persist WKT</text>
+</svg>
+</figure>
+
+**WKB remains the correct choice for stored tables.** Its universality is not a small advantage: it means any Parquet reader, in any language, with any spatial library, can consume the column. The decode cost is real but is dominated by the coordinate copy rather than the header parse, and it disappears entirely for rows eliminated by a bounding-box predicate before decode.
+
+**GeoArrow is the right choice for interchange, not persistence** — at least until support is genuinely universal. Its structure — separate coordinate buffers rather than interleaved bytes per feature — allows vectorised operations and zero-copy handoff between processes, which makes it excellent between a reader and a compute library in the same pipeline. Persisting it narrows the set of consumers that can read the table, which is the property the lakehouse exists to preserve.
+
+**WKT should not be persisted at all.** It roughly doubles storage, parses slowly, and introduces precision questions that binary encoding does not have — a coordinate serialised at fifteen significant figures and re-parsed is not guaranteed to reproduce the original double. Keep it for log lines and error messages, where its readability genuinely helps.
+
+There is a fourth option worth mentioning because it appears in the wild: separate `x` and `y` `DOUBLE` columns for point-only datasets. For telemetry tables that will never hold anything but points, this is faster than any geometry encoding, compresses superbly, and makes every predicate a plain numeric comparison. The cost is that the table cannot later hold a polygon without a migration, so it is a decision to make deliberately rather than by accident.
+
 
 ## Prerequisites and environment setup
 
@@ -187,6 +235,70 @@ The covering bbox only helps if geometries are spatially clustered within row gr
 - **Compression**: `zstd` at level 3 typically beats `snappy` by 20–35% on WKB polygon columns with negligible decode cost. WKB compresses poorly compared to coordinate-delta encodings, so this matters.
 - **Encoding choice**: WKB maximizes interoperability; GeoParquet 1.1 native GeoArrow encodings (`point`, etc.) can be 2–4x smaller and faster to decode for homogeneous point datasets but are read by fewer engines.
 - **Covering overhead**: the bbox struct adds four `DOUBLE` columns — roughly 32 bytes/row before compression. On point-heavy tables that can be 10–15% of file size, so drop it only if no reader does spatial range filtering.
+
+## Metadata That Travels With the Data
+
+The whole point of file-level metadata is that a consumer three years and two teams away can interpret the file correctly with no access to the code that wrote it. That standard is higher than it sounds, and most GeoParquet writers meet only part of it by default.
+
+The specification requires the geometry column name, the encoding, and the geometry types present. It permits, and production use effectively requires, three more: the coordinate reference system as a PROJJSON object rather than an EPSG integer, the bounding box of the file's contents, and an explicit statement of edge interpretation — whether the edges between vertices are planar straight lines or geodesics on the ellipsoid.
+
+The edge field is the one most often omitted and the one that causes the strangest bugs. A polygon with vertices at (0, 0), (90, 0), (90, 50) and (0, 50) covers a different area on the ground under planar edges than under spherical ones, and two engines making different assumptions will disagree about whether a point near the middle is contained. Over small extents the difference is negligible; over continental polygons it is tens of kilometres. State it, and state it even when the answer is the default.
+
+Writing the CRS as PROJJSON rather than an EPSG code matters for a subtler reason: EPSG codes are stable identifiers into a registry that gets revised, and a code alone does not pin the datum transformation path. Embedding the full definition removes the dependency on the reader having the same registry version, which is exactly the failure mode that produces metre-scale offsets between systems that both claim to use 4326.
+
+Finally, the per-file bounding box in the metadata is not the same thing as the per-column Parquet statistics, and both are worth having. The metadata bbox is readable without opening the row groups, making it useful to catalogue crawlers and file-listing tools that never decode data. The Parquet statistics are what the query planner uses. Writers that populate one and not the other are common; a validation step that checks both is the subject of [validating GeoParquet metadata in CI](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/validating-geoparquet-metadata-in-ci/).
+
+
+## Version Skew Between Writers and Readers
+
+GeoParquet is a versioned specification, and the version a file declares determines how a strict reader interprets it. Most production incidents around the format are version-skew incidents rather than encoding incidents.
+
+The pattern is consistent. A pipeline is upgraded, the new writer emits a later specification version, and a downstream reader pinned to an older library either refuses the file or — more often, and worse — ignores the metadata it does not recognise and falls back to defaults. Falling back means assuming planar edges, assuming 4326, and assuming the primary geometry column is the one called `geometry`. When those assumptions happen to be right, nothing breaks and the skew goes unnoticed until a table where they are wrong passes through the same path.
+
+Three defences work. **Declare the version explicitly on write** rather than accepting the library default, so an upgrade is a deliberate change in a diff rather than a side effect of a dependency bump. **Assert the version on read** in any pipeline that matters, failing loudly on a version outside the supported range instead of proceeding with defaults. And **keep a compatibility matrix** — which of your readers supports which version — as a checked-in file rather than as tribal knowledge, updated whenever a consumer is added.
+
+There is one more form of skew worth anticipating: a file that is valid GeoParquet and is *read as plain Parquet* by a consumer with no spatial awareness at all. This happens constantly and is usually benign — the consumer sees a binary column and ignores it — but it becomes a problem when that consumer copies the data onward, because a plain Parquet copy drops the `geo` metadata entirely. The output is a file that still contains geometry and no longer says so. Treat any copy step performed by a non-spatial tool as metadata-destroying, and re-attach the metadata explicitly afterwards rather than assuming it survived.
+
+
+## Reading the Metadata Without a Spatial Library
+
+The `geo` metadata is a JSON string in the Parquet footer's key/value block, which means it is readable with nothing but a Parquet reader. This is worth knowing because it turns "is this file configured correctly" into a question answerable from a shell in one second, with no GIS dependency at all.
+
+<figure class="diagram">
+<svg viewBox="0 0 752 266" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Anatomy of a GeoParquet file: row groups of column chunks, followed by a footer containing per-column statistics and the geo key value metadata holding version, primary column, encoding, CRS and bounding box">
+<rect x="0" y="0" width="752" height="266" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Where the spatial contract physically sits in the file</text>
+<rect x="40" y="56" width="300" height="170" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="190" y="80" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">row groups</text>
+<rect x="62" y="96" width="256" height="34" rx="4" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="1.5"/>
+<text x="190" y="118" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">geometry (BYTE_ARRAY, WKB)</text>
+<rect x="62" y="136" width="256" height="34" rx="4" fill="#e6f0ea" stroke="#2f6e49" stroke-width="1.5"/>
+<text x="190" y="158" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">bbox_min_x … bbox_max_y (DOUBLE)</text>
+<rect x="62" y="176" width="256" height="34" rx="4" fill="#f2e8da" stroke="#9a5a17" stroke-width="1.5"/>
+<text x="190" y="198" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">attribute columns</text>
+<rect x="400" y="56" width="340" height="170" rx="8" fill="#ffffff" stroke="#6a3d9a" stroke-width="2"/>
+<text x="570" y="80" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">footer</text>
+<text x="570" y="104" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">per-column min/max statistics &#8594; pruning</text>
+<rect x="420" y="120" width="300" height="90" rx="6" fill="#faf8fc" stroke="#6a3d9a" stroke-width="1.5"/>
+<text x="570" y="142" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="700" fill="#0d3b45">key/value: &#8220;geo&#8221;</text>
+<text x="570" y="162" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">version, primary_column, encoding</text>
+<text x="570" y="180" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">crs (PROJJSON), edges, bbox</text>
+<text x="570" y="198" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">geometry_types</text>
+<text x="390" y="250" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Statistics make it fast; the geo block makes it interpretable — a file needs both</text>
+</svg>
+</figure>
+
+```python
+# No GIS dependency: pyarrow alone reads the contract out of the footer.
+import json, pyarrow.parquet as pq
+
+meta = pq.ParquetFile("s3://lakehouse/boundaries/part-0000.parquet").metadata
+geo = json.loads(meta.metadata[b"geo"].decode())
+print(geo["version"], geo["primary_column"])
+print(geo["columns"][geo["primary_column"]]["encoding"])
+```
+
+A file that raises `KeyError` here is a plain Parquet file that happens to contain geometry — readable, but not self-describing, and therefore not safe to hand to a consumer who was not told what is in it.
 
 ## Common errors and fixes
 

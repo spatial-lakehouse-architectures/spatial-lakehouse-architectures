@@ -23,7 +23,7 @@ The recurring decision is assert-versus-transform. Asserting is a validation gat
 The pipeline sits at the ingestion boundary, between the raw landing zone and the query-serving table. Every batch passes through four stages before a single row is committed.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CRS management pipeline data flow from ingestion through assert or transform, validation, and write to the lakehouse table">
+<svg viewBox="0 66 710 184" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CRS management pipeline data flow from ingestion through assert or transform, validation, and write to the lakehouse table">
 <title>CRS enforcement data path on ingestion</title>
 <desc>Incoming batches enter a CRS assert-or-transform stage, pass a validation gate that checks coordinate ranges and metadata, then write to the GeoParquet-backed table in EPSG:4326; failures are quarantined.</desc>
 <defs>
@@ -31,7 +31,7 @@ The pipeline sits at the ingestion boundary, between the raw landing zone and th
 <path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/>
 </marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="66" width="710" height="184" fill="#f7fbfc"/>
 <rect x="18" y="90" width="120" height="64" rx="6" fill="#ffffff" stroke="#cfe3e7" stroke-width="1.5"/>
 <text x="78" y="116" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="#0d3b45">Ingest</text>
 <text x="78" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">mixed CRS</text>
@@ -59,6 +59,82 @@ The pipeline sits at the ingestion boundary, between the raw landing zone and th
 </figure>
 
 The transform stage reads the declared source CRS (from GeoParquet metadata, a sidecar `.prj`, or a producer-supplied EPSG code) and, if it differs from the storage authority, reprojects. The validate stage is a second, independent check that never trusts the declared CRS blindly — it verifies coordinates fall inside the valid EPSG:4326 envelope and runs the range heuristics detailed in [Detecting CRS Drift in Ingestion Pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/). Only after both stages pass does the batch write to the [GeoParquet-encoded](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/geoparquet-encoding-standards/) table with the CRS stamped into column metadata.
+
+## Why Reprojection Is Not Reversible
+
+The instinct that a coordinate reference system is a label — something you can change back if you get it wrong — is the source of most CRS incidents. A reprojection is a numerical transformation, and it loses information in ways that make the round trip inexact.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 294" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Round trip of a coordinate from 4326 to 3857 and back, showing accumulated floating point error, and a second path through a datum shift where a missing grid file introduces a metre-scale offset">
+<defs>
+<marker id="crs-rt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0e6e7d"/></marker>
+</defs>
+<rect x="0" y="0" width="766" height="294" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two round trips, two very different error budgets</text>
+<rect x="34" y="66" width="180" height="66" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="124" y="92" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">4326 source</text>
+<text x="124" y="113" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">13.404954, 52.520008</text>
+<rect x="300" y="66" width="180" height="66" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="390" y="92" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">3857 projected</text>
+<text x="390" y="113" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">1492245.9, 6894103.2</text>
+<rect x="566" y="66" width="188" height="66" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="660" y="92" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">back to 4326</text>
+<text x="660" y="113" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">error &lt; 1 nanodegree</text>
+<line x1="214" y1="99" x2="300" y2="99" stroke="#0e6e7d" stroke-width="2" marker-end="url(#crs-rt-arrow)"/>
+<line x1="480" y1="99" x2="566" y2="99" stroke="#0e6e7d" stroke-width="2" marker-end="url(#crs-rt-arrow)"/>
+<text x="390" y="152" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">same datum: only floating-point rounding is lost</text>
+<rect x="34" y="184" width="180" height="66" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="124" y="210" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">4277 source</text>
+<text x="124" y="231" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">legacy national datum</text>
+<rect x="300" y="184" width="180" height="66" rx="8" fill="#f2e8da" stroke="#9a5a17" stroke-width="2"/>
+<text x="390" y="210" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">datum shift</text>
+<text x="390" y="231" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">grid file, or fallback</text>
+<rect x="566" y="184" width="188" height="66" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="660" y="210" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">back to 4277</text>
+<text x="660" y="231" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">error up to 3 metres</text>
+<line x1="214" y1="217" x2="300" y2="217" stroke="#9a5a17" stroke-width="2" marker-end="url(#crs-rt-arrow)"/>
+<line x1="480" y1="217" x2="566" y2="217" stroke="#9a5a17" stroke-width="2" marker-end="url(#crs-rt-arrow)"/>
+<text x="390" y="278" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">Datum changes are lossy; keep the original coordinates, not just the transformed ones</text>
+</svg>
+</figure>
+
+Within a single datum, reprojection is essentially reversible: the transformation is analytic, and the error is bounded by double-precision rounding — well under a micrometre on the ground. Across datums it is a different operation entirely. A datum shift interpolates from a grid of measured offsets, and the accuracy depends on whether that grid file is installed. When it is missing, PROJ falls back to a coarser seven-parameter transformation without raising an error, and coordinates land one to three metres from where they belong. That is invisible on a city map and catastrophic in a cadastral boundary or a utility-strike analysis.
+
+The operational conclusion is to **retain the source coordinates**. Store the canonical geometry in the table's declared CRS for querying, and keep the original geometry and its source SRID in sibling columns for anything that must be re-derived later. The storage cost is real but modest against the alternative, which is discovering after a year that every parcel in one region is offset because a container image shipped without a grid file.
+
+## Detecting a CRS Problem Before the Data Lands
+
+CRS defects have a useful property: they are almost always detectable from coordinate values alone, without any knowledge of what the data represents. Three cheap assertions catch the overwhelming majority.
+
+**Range assertions** catch projected data claiming to be geographic. Geographic coordinates live within ±180 and ±90; a value of 1492245.9 in a column declared as 4326 is a projected coordinate in metres, and no legitimate dataset produces it. This single check catches the most common upstream mistake, which is a provider changing its export settings.
+
+**Extent assertions** catch geographic data claiming to be projected, and mixed-CRS batches. Compute the bounding box of the incoming batch and compare it against the expected extent for the dataset. A municipal dataset whose batch extent suddenly spans two continents contains at least one row in the wrong system. Set the tolerance generously — the check exists to catch order-of-magnitude errors, not to enforce a precise boundary.
+
+**Displacement assertions** catch datum drift, which the first two miss because the coordinates remain entirely plausible. Keep a small set of control points with known coordinates — survey markers, or simply a stable sample of the previous load — and assert that the distance between the stored and expected position stays under a threshold. A sub-metre threshold catches a missing grid file; a ten-metre threshold catches a wholesale datum change.
+
+```python
+# Run on every incoming batch, before the write. pyarrow >= 15, shapely >= 2.0.
+EXPECTED_EXTENT = (5.8, 47.2, 15.1, 55.1)   # Germany, in 4326
+
+def assert_crs_sane(batch, srid_column="source_srid"):
+    xs = batch.column("bbox_min_x").to_pylist() + batch.column("bbox_max_x").to_pylist()
+    ys = batch.column("bbox_min_y").to_pylist() + batch.column("bbox_max_y").to_pylist()
+
+    if max(abs(v) for v in xs) > 180.0 or max(abs(v) for v in ys) > 90.0:
+        raise ValueError("coordinates outside geographic range — batch is projected, not 4326")
+
+    minx, miny, maxx, maxy = min(xs), min(ys), max(xs), max(ys)
+    ex = EXPECTED_EXTENT
+    if minx < ex[0] - 1 or miny < ex[1] - 1 or maxx > ex[2] + 1 or maxy > ex[3] + 1:
+        raise ValueError(f"batch extent {(minx, miny, maxx, maxy)} escapes the expected area")
+
+    srids = set(batch.column(srid_column).to_pylist())
+    if len(srids) > 1:
+        raise ValueError(f"batch mixes source systems: {sorted(srids)}")
+```
+
+Run these at the ingestion boundary rather than in a nightly report. A batch rejected at write time costs one retry; the same batch discovered a week later costs a rewrite of every downstream table that consumed it, and an audit of every result served in the interim. The full drift-detection treatment, including how to alert without drowning in false positives, is in [detecting CRS drift in ingestion pipelines](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/crs-management-pipelines/detecting-crs-drift-in-ingestion-pipelines/).
+
 
 ## Prerequisites and environment setup
 
@@ -222,6 +298,38 @@ Reprojection is CPU-bound and, done row-by-row, dominates ingest time. The tunin
 - **Choose the transformation, not just the CRS pair.** For datum shifts (for example NAD83 ↔ WGS 84), multiple pipelines with different accuracy exist. Pin the pipeline explicitly when sub-metre accuracy matters; the default "best available" pipeline can change between PROJ data releases and silently shift results.
 
 As a rough baseline, a modern core reprojects on the order of 5–15 million coordinates per second through a cached, vectorized transformer, so a 50-million-point batch reprojects in single-digit seconds — trivial next to the object-store write. If reprojection shows up as a bottleneck, the cause is almost always a Python loop or a per-batch transformer rebuild, not PROJ itself.
+
+## The Three Places a CRS Can Be Recorded
+
+A single table can carry its coordinate reference system in three separate places, and they can disagree. Knowing which one a given reader trusts is what makes a mismatch diagnosable in minutes rather than days.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three locations where a coordinate reference system is recorded — GeoParquet file metadata, table properties in the catalog, and a per-row source SRID column — with the reader that trusts each one">
+<rect x="0" y="0" width="766" height="232" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Three records of one fact — keep them in agreement</text>
+<rect x="26" y="58" width="230" height="120" rx="8" fill="#ffffff" stroke="#2f6e49" stroke-width="2"/>
+<text x="141" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">File metadata</text>
+<text x="141" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">GeoParquet &#8220;geo&#8221; key</text>
+<text x="141" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">trusted by: GeoPandas,</text>
+<text x="141" y="146" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">GDAL, catalogue crawlers</text>
+<text x="141" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">travels with the file</text>
+<rect x="275" y="58" width="230" height="120" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="390" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">Table properties</text>
+<text x="390" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">catalog key/value</text>
+<text x="390" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">trusted by: Spark, Trino,</text>
+<text x="390" y="146" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">governance tooling</text>
+<text x="390" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">lost on table recreation</text>
+<rect x="524" y="58" width="230" height="120" rx="8" fill="#ffffff" stroke="#9a5a17" stroke-width="2"/>
+<text x="639" y="84" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">source_srid column</text>
+<text x="639" y="106" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">one value per row</text>
+<text x="639" y="130" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">trusted by: your own</text>
+<text x="639" y="146" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">reconciliation jobs</text>
+<text x="639" y="166" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#9a5a17">records provenance, not truth</text>
+<text x="390" y="216" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">The column says where a row came from; the other two say what the stored coordinates mean</text>
+</svg>
+</figure>
+
+The distinction that resolves most confusion is that the first two describe the **stored** geometry and the third describes its **origin**. A row whose `source_srid` is 25832 and whose table declares 4326 is not inconsistent — it is a row that was reprojected on the way in, which is exactly what should happen. A row whose `source_srid` is 25832 and whose coordinates are in the hundreds of thousands *is* inconsistent, because the reprojection did not run. Assert the relationship rather than the values: when `source_srid` differs from the table CRS, the coordinates must be inside the table CRS's valid range.
 
 ## Common errors and fixes
 

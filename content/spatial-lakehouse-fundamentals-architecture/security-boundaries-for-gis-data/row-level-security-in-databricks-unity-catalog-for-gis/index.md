@@ -126,13 +126,13 @@ DESCRIBE EXTENDED gis_prod.assets.spatial_assets;
 A `leaked` count of `0` on the explicit east probe is the proof that the row filter is enforced at the table, not layered as a bypassable view. Re-running the same query as a `gis_admins` member returns all three rows with full-precision geometry, confirming the policy branches on identity.
 
 <figure class="diagram">
-<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Unity Catalog applying a row filter then a column mask to a spatial Delta table before returning results">
+<svg viewBox="0 76 752 106" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Unity Catalog applying a row filter then a column mask to a spatial Delta table before returning results">
 <title>Row filter and column mask on a spatial Delta table</title>
 <desc>A non-admin query hits the Delta table, Unity Catalog evaluates the row filter to drop other tenants and out-of-region rows, applies the geometry column mask to coarsen coordinates, then returns filtered masked rows.</desc>
 <defs>
 <marker id="arw-uc-rls" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0 0 L9 4 L0 8 z" fill="#0e6e7d"/></marker>
 </defs>
-<rect x="0" y="0" width="760" height="250" fill="#f7fbfc"/>
+<rect x="0" y="76" width="752" height="106" fill="#f7fbfc"/>
 <rect x="18" y="95" width="120" height="60" rx="6" fill="#ffffff" stroke="#cfe3e7"/>
 <text x="78" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#0d3b45">west_analyst</text>
 <text x="78" y="140" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">SELECT geom ...</text>
@@ -155,3 +155,61 @@ A `leaked` count of `0` on the explicit east probe is the proof that the row fil
 </figure>
 
 The Databricks model is declarative where Trino's is provider-driven; for the open-source counterpart that injects the same predicate through the access control SPI, see [row-level security for spatial data in Trino](https://www.spatial-lakehouse-architectures.org/spatial-lakehouse-fundamentals-architecture/security-boundaries-for-gis-data/row-level-security-for-spatial-data-in-trino/), and consult the [Databricks geospatial functions reference](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-functions-builtin) for the full `ST_*` catalog.
+
+## How a Row Filter and a Column Mask Compose
+
+Unity Catalog applies row filters and column masks in a defined order, and understanding it prevents a class of surprise where a mask appears not to apply.
+
+<figure class="diagram">
+<svg viewBox="0 0 766 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Order of evaluation in Unity Catalog: the row filter removes rows first, then the column mask transforms the surviving values, so a mask never affects which rows are returned">
+<defs>
+<marker id="uc-order-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6a3d9a"/></marker>
+</defs>
+<rect x="0" y="0" width="766" height="232" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Rows are removed first; values are coarsened second</text>
+<rect x="26" y="70" width="200" height="76" rx="8" fill="#ffffff" stroke="#0e6e7d" stroke-width="2"/>
+<text x="126" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">base table</text>
+<text x="126" y="120" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">all tenants, exact geometry</text>
+<rect x="290" y="70" width="200" height="76" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="390" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">ROW FILTER</text>
+<text x="390" y="120" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">tenant + region predicate</text>
+<rect x="554" y="70" width="200" height="76" rx="8" fill="#faf8fc" stroke="#6a3d9a" stroke-width="2"/>
+<text x="654" y="98" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#0d3b45">COLUMN MASK</text>
+<text x="654" y="120" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">geometry precision reduced</text>
+<line x1="226" y1="108" x2="290" y2="108" stroke="#6a3d9a" stroke-width="2" marker-end="url(#uc-order-arrow)"/>
+<line x1="490" y1="108" x2="554" y2="108" stroke="#6a3d9a" stroke-width="2" marker-end="url(#uc-order-arrow)"/>
+<text x="390" y="186" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#0d3b45">A masked column cannot be used to decide which rows are visible</text>
+<text x="390" y="216" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#3d5a63">so put every access decision in the row filter, never in the mask</text>
+</svg>
+</figure>
+
+The consequence worth internalising is that a column mask is a **presentation** control, not an access control. Coarsening a geometry to 500 metres does not prevent the caller from learning that a feature exists at that approximate location, and it does not stop them from filtering, counting or joining on the unmasked columns of the same row. If a row should not be known about at all, it has to be removed by the row filter.
+
+There is a second-order effect on performance. Because the mask is applied after filtering, a mask that calls an expensive geometry function runs once per surviving row — which is fine when the filter is selective and expensive when it is not. Where the coarse representation is the common case, materialising a pre-simplified geometry column and masking to *that* column is dramatically cheaper than simplifying on every read.
+
+## Keeping Filter Functions Testable
+
+A row filter in Unity Catalog is a SQL function, which means it can be tested like one — and testing it directly is far easier than testing it through the table it protects.
+
+<figure class="diagram">
+<svg viewBox="0 0 762 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Testing a row filter function directly with a table of principal, geometry and expected verdict rows, separate from testing the table binding itself">
+<rect x="0" y="0" width="762" height="210" fill="#f7fbfc"/>
+<text x="390" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#0d3b45">Two tests, two concerns</text>
+<rect x="30" y="58" width="352" height="140" rx="8" fill="#e6f0ea" stroke="#2f6e49" stroke-width="2"/>
+<text x="206" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">the function</text>
+<text x="206" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">call it directly with fixture rows</text>
+<text x="206" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">principal × geometry &#8594; expected</text>
+<text x="206" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">covers boundary and empty cases</text>
+<text x="206" y="180" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#2f6e49">runs in seconds, no protected data</text>
+<rect x="398" y="58" width="352" height="140" rx="8" fill="#e4f0f2" stroke="#0e6e7d" stroke-width="2"/>
+<text x="574" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#0d3b45">the binding</text>
+<text x="574" y="112" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#33707d">is the filter actually attached?</text>
+<text x="574" y="134" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">query the table as each persona</text>
+<text x="574" y="156" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0d3b45">assert row counts per persona</text>
+<text x="574" y="180" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#0e6e7d">catches an unbound or dropped filter</text>
+</svg>
+</figure>
+
+Both tests are necessary and they fail for different reasons. A correct function that is not attached to the table protects nothing, and an attached function with a logic error protects the wrong set. The binding test is the one to run after every deployment, because table recreation during a migration is the most common way a filter quietly disappears.
+
+One final operational note: keep the filter and mask function definitions in version control alongside the table DDL, and deploy them together. A filter function edited directly in a notebook is invisible to review, cannot be diffed, and will not survive a workspace migration — and because it enforces access rather than merely computing a value, it is the last thing on the platform that should exist only as a stored object nobody can inspect through the usual channels.

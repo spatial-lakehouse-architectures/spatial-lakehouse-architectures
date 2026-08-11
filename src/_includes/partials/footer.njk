@@ -12,7 +12,7 @@
       {% for section in site.sections %}
         {% set topics = collections.content | topicsOf(section.slug) %}
         <section class="site-footer__col">
-          <h2 class="site-footer__heading" style="--section-color: {{ section.color }}">
+          <h2 class="site-footer__heading" data-section="{{ section.slug }}">
             <a href="{{ site.url }}/{{ section.slug }}/">{{ icon(section.icon) }} {{ section.title }}</a>
           </h2>
           <ul>
